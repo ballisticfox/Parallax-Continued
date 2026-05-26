@@ -17,6 +17,15 @@ sampler2D _DisplacementMap;
 sampler2D _InfluenceMap;
 
 UNITY_DECLARE_TEX2DARRAY(_PlanetColormap);
+UNITY_DECLARE_TEX2DARRAY(_PlanetHeightmap);
+
+float _HeightScale;
+float _HeightOffset;
+float _NearFieldEnd;
+float _BlendWidth;
+// Width (in texels) of one face slice of _PlanetHeightmap. Auto-set by the C# loader; needed by the
+// Mitchell-Netravali sampler to walk the texel grid manually.
+float _HeightmapResolution;
 
 #if defined (AMBIENT_OCCLUSION)
     sampler2D _OcclusionMap;
@@ -66,6 +75,10 @@ float _SteepMidpoint;
 float _MaxTessellation;
 float _TessellationEdgeLength;
 float _MaxTessellationRange;
+// Distance over which the tiling _DisplacementMap contributes to vertex displacement. Decoupled from
+// _MaxTessellationRange so the GPU heightmap path can extend tessellation to km scale without dragging
+// tile-level vertex bumps (which visibly shift at biplanar mip transitions) along with it.
+float _TileDisplacementRange;
 
 // Emission
 float3 _EmissionColor;

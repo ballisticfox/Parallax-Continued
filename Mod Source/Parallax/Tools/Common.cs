@@ -367,6 +367,43 @@ namespace Parallax
             loadedTextures.Add(name, handle);
         }
 
+        // Applies per-name texture import overrides (wrap/filter mode, derived uniforms) and broadcasts
+        // the texture to every parallax material variant.
+        private void ApplyTextureToMaterials(string name, Texture tex)
+        {
+            if (tex != null && TextureUtils.IsArray(name))
+            {
+                // Cube-face Texture2DArrays need clamp wrap so a sample at face-edge (u=1 etc.) doesn't
+                // wrap around to the opposite edge of the same face slice.
+                tex.wrapMode = TextureWrapMode.Clamp;
+
+                // _PlanetHeightmap is currently sampled bilinearly in the vertex shader; leave filterMode at
+                // the loader default. (If SampleHeightmapMitchellLOD0 is re-enabled in the shader, switch
+                // filterMode to FilterMode.Point here so the manual cubic filter sees raw texel values.)
+                // _HeightmapResolution stays pushed to the materials so the Mitchell helper remains usable.
+                if (name == "_PlanetHeightmap")
+                {
+                    if (tex is Texture2DArray array && array.width > 0)
+                    {
+                        float resolution = array.width;
+                        parallaxMaterials.parallaxLow.SetFloat("_HeightmapResolution", resolution);
+                        parallaxMaterials.parallaxMid.SetFloat("_HeightmapResolution", resolution);
+                        parallaxMaterials.parallaxHigh.SetFloat("_HeightmapResolution", resolution);
+                        parallaxMaterials.parallaxLowMid.SetFloat("_HeightmapResolution", resolution);
+                        parallaxMaterials.parallaxMidHigh.SetFloat("_HeightmapResolution", resolution);
+                        parallaxMaterials.parallaxFull.SetFloat("_HeightmapResolution", resolution);
+                    }
+                }
+            }
+
+            parallaxMaterials.parallaxLow.SetTexture(name, tex);
+            parallaxMaterials.parallaxMid.SetTexture(name, tex);
+            parallaxMaterials.parallaxHigh.SetTexture(name, tex);
+            parallaxMaterials.parallaxLowMid.SetTexture(name, tex);
+            parallaxMaterials.parallaxMidHigh.SetTexture(name, tex);
+            parallaxMaterials.parallaxFull.SetTexture(name, tex);
+        }
+
         public void Load()
         {
             if (loaded)
@@ -398,14 +435,7 @@ namespace Parallax
                 // Bump maps need to be linear, while everything else sRGB
                 // This could be handled better, tbh, but at least we're accounting for linear textures this time around
 
-                parallaxMaterials.parallaxLow.SetTexture(name, tex);
-                parallaxMaterials.parallaxMid.SetTexture(name, tex);
-                parallaxMaterials.parallaxHigh.SetTexture(name, tex);
-
-                parallaxMaterials.parallaxLowMid.SetTexture(name, tex);
-                parallaxMaterials.parallaxMidHigh.SetTexture(name, tex);
-
-                parallaxMaterials.parallaxFull.SetTexture(name, tex);
+                ApplyTextureToMaterials(name, tex);
             }
 
             loaded = true;
@@ -445,14 +475,7 @@ namespace Parallax
                 // Bump maps need to be linear, while everything else sRGB
                 // This could be handled better, tbh, but at least we're accounting for linear textures this time around
 
-                parallaxMaterials.parallaxLow.SetTexture(name, tex);
-                parallaxMaterials.parallaxMid.SetTexture(name, tex);
-                parallaxMaterials.parallaxHigh.SetTexture(name, tex);
-
-                parallaxMaterials.parallaxLowMid.SetTexture(name, tex);
-                parallaxMaterials.parallaxMidHigh.SetTexture(name, tex);
-
-                parallaxMaterials.parallaxFull.SetTexture(name, tex);
+                ApplyTextureToMaterials(name, tex);
             }
 
             loaded = true;

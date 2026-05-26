@@ -71,6 +71,7 @@
     {                                               \
         float4 vertex : POSITION;                   \
         float3 normal : NORMAL;                     \
+        float2 texcoord2 : TEXCOORD2;               \
     };
 
 #define PARALLAX_SHADOW_CASTER_STRUCT_CONTROL       \
@@ -82,6 +83,7 @@
         float3 worldPos : INTERNALTESSPOS;          \
         float3 worldNormal : NORMAL;                \
         float4 landMask : TEXCOORD3;                \
+        float2 texcoord2 : TEXCOORD4;               \
     };
 
 #define PARALLAX_SHADOW_CASTER_STRUCT_INTERP        \

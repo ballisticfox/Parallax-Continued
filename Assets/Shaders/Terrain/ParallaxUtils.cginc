@@ -7,6 +7,126 @@
 #endif
 
 //
+//  Cube-face UV helpers (shared between fragment-shader colormap sampling and vertex-shader heightmap displacement)
+//  texcoord2 packing (written by PQSMod_PlanetUV into mesh.uv3):
+//      texcoord2.x = faceIndex + faceU  (integer part = cube face 0..5, fractional part = u in [0,1))
+//      texcoord2.y = faceV              (in [0,1])
+//
+void UnpackFaceUV(float2 packed, out float faceIndex, out float2 faceUV)
+{
+    faceIndex = floor(packed.x);
+    faceUV = float2(frac(packed.x), packed.y);
+}
+
+float2 CorrectFaceUV(float2 faceUV, float faceIndex)
+{
+    if (faceIndex == 0)      return float2(faceUV.y, 1.0 - faceUV.x);  // XP: 90° CCW
+    else if (faceIndex == 1) return float2(1.0 - faceUV.y, faceUV.x);  // XN: 90° CW
+    else if (faceIndex == 2) return 1.0 - faceUV;                      // YP: 180°
+    else if (faceIndex == 3) return 1.0 - faceUV;                      // YN: 180°
+    else if (faceIndex == 4) return 1.0 - faceUV;                      // ZP: 180°
+    else                     return faceUV;                            // ZN: identity
+}
+
+//
+//  Mitchell-Netravali bicubic (B=C=1/3) — matches the CPU-side heightmap sampler so PQS-built
+//  geometry and GPU-displaced geometry agree at the blend boundary. Weights sum to 1 by construction.
+//
+float MitchellNetravali1D(float x)
+{
+    float ax = abs(x);
+    float ax2 = ax * ax;
+    float ax3 = ax2 * ax;
+    // B = C = 1/3 → kernel coefficients simplify as below.
+    if (ax < 1.0)
+    {
+        return (7.0 * ax3 - 12.0 * ax2 + 16.0 / 3.0) / 6.0;
+    }
+    else if (ax < 2.0)
+    {
+        return (-(7.0 / 3.0) * ax3 + 12.0 * ax2 - 20.0 * ax + 32.0 / 3.0) / 6.0;
+    }
+    return 0.0;
+}
+
+// Heightmap-specific helpers live behind the SCALED guard because _PlanetHeightmap,
+// _HeightmapResolution, _HeightOffset, _HeightScale, _NearFieldEnd and _BlendWidth are only
+// declared in the terrain-side ParallaxVariables.cginc — the scaled shader doesn't use them.
+#if !defined (SCALED)
+
+// 16-tap (4x4) Mitchell-Netravali sample of _PlanetHeightmap on the given face slice.
+// Currently NOT called — ApplyGPUHeightmapDisplacement uses a single bilinear sample. Kept here so it can be
+// re-enabled by swapping the sample call below. When used, the heightmap MUST be loaded with filterMode=Point
+// (so taps return raw texels instead of pre-blended bilinear) and wrapMode=Clamp.
+float SampleHeightmapMitchellLOD0(float2 uv, float faceIndex)
+{
+    float texSize = _HeightmapResolution;
+    float invTexSize = 1.0 / texSize;
+
+    // Convert UV to texel-grid space: (0,0) is the corner of texel (0,0), texel centers are at integer + 0.5.
+    // Subtracting 0.5 puts us in "distance from nearest lower-left texel center" space.
+    float2 pixelPos = uv * texSize - 0.5;
+    float2 pixelInt = floor(pixelPos);
+    float2 pixelFrac = pixelPos - pixelInt;
+
+    float result = 0.0;
+
+    [unroll]
+    for (int j = -1; j <= 2; j++)
+    {
+        [unroll]
+        for (int i = -1; i <= 2; i++)
+        {
+            // Sample at the center of texel (pixelInt + (i,j)), clamped to stay inside the face slice.
+            float2 sampleUV = (pixelInt + float2(i, j) + 0.5) * invTexSize;
+            sampleUV = clamp(sampleUV, 0.5 * invTexSize, 1.0 - 0.5 * invTexSize);
+
+            float h = UNITY_SAMPLE_TEX2DARRAY_LOD(_PlanetHeightmap, float3(sampleUV, faceIndex), 0).r;
+            float wx = MitchellNetravali1D((float)i - pixelFrac.x);
+            float wy = MitchellNetravali1D((float)j - pixelFrac.y);
+            result += h * wx * wy;
+        }
+    }
+
+    return result;
+}
+
+//
+//  GPU Heightmap Displacement
+//  Overrides the vertex radial position with a value sampled from _PlanetHeightmap when the vertex is far from camera.
+//  Blend strip controlled by _NearFieldEnd / _BlendWidth keeps PQS geometry near the craft (for collision accuracy).
+//  Called in Domain_Shader (post-tessellation) so tessellated vertices get freshly sampled heights instead of
+//  linear interpolation of already-displaced corners — important for capturing heightmap detail on coarse
+//  far-field PQS quads when _MaxTessellationRange is stretched out.
+//
+float3 ApplyGPUHeightmapDisplacement(float3 worldPos, float2 texcoord2)
+{
+    float distToCamera = length(worldPos - _WorldSpaceCameraPos);
+    float blendFactor = saturate((distToCamera - _NearFieldEnd) / _BlendWidth);
+
+    // Skip the sample/transform entirely when no GPU contribution is requested.
+    if (blendFactor <= 0.0)
+        return worldPos;
+
+    float faceIndex;
+    float2 faceUV;
+    UnpackFaceUV(texcoord2, faceIndex, faceUV);
+    faceUV = CorrectFaceUV(faceUV, faceIndex);
+
+    // Bilinear sample via the default sampler. Swap for SampleHeightmapMitchellLOD0(faceUV, faceIndex)
+    // to match the CPU-side Mitchell-Netravali filter (also flip filterMode back to Point in the C# loader).
+    float sampledHeight = UNITY_SAMPLE_TEX2DARRAY_LOD(_PlanetHeightmap, float3(faceUV, faceIndex), 0).r;
+    float targetRadius = _PlanetRadius + _HeightOffset + sampledHeight * _HeightScale;
+
+    float3 dirFromCenter = normalize(worldPos - _PlanetOrigin);
+    float3 correctedWorldPos = _PlanetOrigin + dirFromCenter * targetRadius;
+
+    return lerp(worldPos, correctedWorldPos, blendFactor);
+}
+
+#endif // !SCALED
+
+//
 //  Tessellation Functions
 //  Most as or adapted from, and credit to, https://nedmakesgames.medium.com/mastering-tessellation-shaders-and-their-many-uses-in-unity-9caeb760150e
 //
@@ -112,7 +232,7 @@ float3 CalculatePhongPosition(float3 bary, float3 p0PositionWS, float3 p0NormalW
 }
 
 #define CALCULATE_VERTEX_DISPLACEMENT(o, landMask, displacementTex)                                                                                                 \
-    float displacementRange = 1 - min(1, terrainDistance / _MaxTessellationRange);                                                                                  \
+    float displacementRange = 1 - min(1, terrainDistance / _TileDisplacementRange);                                                                                 \
     float displacement = BLEND_CHANNELS_IN_TEX(landMask, displacementTex);                                                                                          \
     float displacementOffset = _DisplacementOffset;                                                                                                                 \
     displacement = lerp(displacement, displacementTex.a, landMask.b);                                                                                               \

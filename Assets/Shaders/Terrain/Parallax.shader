@@ -6,7 +6,12 @@ Shader "Custom/Parallax"
         [Space(10)]
         _MaxTessellation("Max Tessellation", Range(1, 64)) = 1
         _TessellationEdgeLength("Tessellation Edge Length (Pixels)", Range(0.01, 100)) = 1
-        _MaxTessellationRange("Max Tessellation Range", Range(1, 100)) = 5
+        // Free-form so the GPU heightmap path can drive tessellation out to kilometer scale.
+        _MaxTessellationRange("Max Tessellation Range (meters)", Float) = 5
+        // Range over which the tiling _DisplacementMap adds vertex bumps. Independent of tessellation range
+        // so close-range bumps stay close. C# defaults this to _NearFieldEnd (clean handoff to GPU heightmap)
+        // or to _MaxTessellationRange (backwards-compat) when the body config doesn't specify it.
+        _TileDisplacementRange("Tile Displacement Range (meters)", Float) = 100
 
         [Space(10)]
         [Header(Low Textures)]
@@ -37,6 +42,18 @@ Shader "Custom/Parallax"
         _DisplacementMap("Displacement Map", 2D) = "black" {}
         _OcclusionMap("Occlusion Map", 2D) = "white" {}
         [NoScaleOffset] _PlanetColormap("Planet Colormap (Cube Face Array)", 2DArray) = "white" {}
+
+        [Space(10)]
+        [Header(GPU Heightmap Displacement)]
+        [Space(10)]
+        [NoScaleOffset] _PlanetHeightmap("Planet Heightmap (Cube Face Array)", 2DArray) = "black" {}
+        _HeightScale("Height Scale (meters)", Float) = 0
+        _HeightOffset("Height Offset (meters)", Float) = 0
+        // Large default disables GPU displacement until the C# side sets it (blendFactor stays 0).
+        _NearFieldEnd("Near Field End (meters)", Float) = 99999999
+        _BlendWidth("Blend Width (meters)", Float) = 1
+        // Auto-set by the C# loader from the loaded heightmap's width.
+        [HideInInspector] _HeightmapResolution("Heightmap Resolution (texels)", Float) = 4096
 
         [Space(10)]
         [Header(Texture Parameters)]
@@ -185,9 +202,12 @@ Shader "Custom/Parallax"
 
                 o.worldPos = BARYCENTRIC_INTERPOLATE(worldPos);
                 o.worldNormal = normalize(BARYCENTRIC_INTERPOLATE(worldNormal));
-                o.viewDir = BARYCENTRIC_INTERPOLATE(viewDir);
                 o.color = BARYCENTRIC_INTERPOLATE(color);
                 o.texcoord2 = BARYCENTRIC_INTERPOLATE(texcoord2);
+                // GPU heightmap displacement runs post-tessellation so tessellated vertices get freshly sampled heights
+                // instead of linear interpolation of already-displaced corners. viewDir is recomputed from the result.
+                o.worldPos = ApplyGPUHeightmapDisplacement(o.worldPos, o.texcoord2);
+                o.viewDir = _WorldSpaceCameraPos - o.worldPos;
                 float4 landMask = BARYCENTRIC_INTERPOLATE(landMask);
 
                 float terrainDistance = length(o.viewDir);
@@ -334,12 +354,13 @@ Shader "Custom/Parallax"
             TessellationControlPoint Vertex_Shader (appdata v)
             {
                 TessellationControlPoint o;
-        
+
                 o.pos = UnityObjectToClipPos(v.vertex);
                 o.worldPos = mul(unity_ObjectToWorld, v.vertex);
                 o.worldNormal = normalize(mul(unity_ObjectToWorld, v.normal).xyz);
                 o.normal = v.normal;
                 o.vertex = v.vertex;
+                o.texcoord2 = v.texcoord2;
                 o.landMask = GetLandMask(o.worldPos, o.worldNormal);
                 return o;
             }
@@ -383,8 +404,11 @@ Shader "Custom/Parallax"
                 v.vertex = BARYCENTRIC_INTERPOLATE(vertex);
                 v.worldNormal = normalize(BARYCENTRIC_INTERPOLATE(worldNormal));
                 v.normal = BARYCENTRIC_INTERPOLATE(normal);
+                float2 texcoord2 = BARYCENTRIC_INTERPOLATE(texcoord2);
+                // GPU heightmap displacement so the shadow caster's geometry matches the visible terrain.
+                v.worldPos = ApplyGPUHeightmapDisplacement(v.worldPos, texcoord2);
                 float4 landMask = BARYCENTRIC_INTERPOLATE(landMask);
-            
+
                 float terrainDistance = length(_WorldSpaceCameraPos - v.worldPos);
                 DO_WORLD_UV_CALCULATIONS(terrainDistance * 0.2, v.worldPos)
 
@@ -514,11 +538,13 @@ Shader "Custom/Parallax"
         
                 v.worldPos = BARYCENTRIC_INTERPOLATE(worldPos);
                 v.worldNormal = normalize(BARYCENTRIC_INTERPOLATE(worldNormal));
-                v.viewDir = BARYCENTRIC_INTERPOLATE(viewDir);
                 v.color = BARYCENTRIC_INTERPOLATE(color);
                 v.lightDir = BARYCENTRIC_INTERPOLATE(lightDir);
                 v.vertex = BARYCENTRIC_INTERPOLATE(vertex);
                 v.texcoord2 = BARYCENTRIC_INTERPOLATE(texcoord2);
+                // GPU heightmap displacement runs post-tessellation; viewDir is recomputed from the displaced position.
+                v.worldPos = ApplyGPUHeightmapDisplacement(v.worldPos, v.texcoord2);
+                v.viewDir = _WorldSpaceCameraPos - v.worldPos;
 
                 float4 landMask = BARYCENTRIC_INTERPOLATE(landMask);
 
@@ -746,9 +772,11 @@ Shader "Custom/Parallax"
 
                 o.worldPos = BARYCENTRIC_INTERPOLATE(worldPos);
                 o.worldNormal = normalize(BARYCENTRIC_INTERPOLATE(worldNormal));
-                o.viewDir = BARYCENTRIC_INTERPOLATE(viewDir);
                 o.color = BARYCENTRIC_INTERPOLATE(color);
                 o.texcoord2 = BARYCENTRIC_INTERPOLATE(texcoord2);
+                // GPU heightmap displacement runs post-tessellation; viewDir is recomputed from the displaced position.
+                o.worldPos = ApplyGPUHeightmapDisplacement(o.worldPos, o.texcoord2);
+                o.viewDir = _WorldSpaceCameraPos - o.worldPos;
                 float4 landMask = BARYCENTRIC_INTERPOLATE(landMask);
 
                 float terrainDistance = length(o.viewDir);

@@ -480,6 +480,23 @@ namespace Parallax
                 ConfigUtils.TryParse(body.planetName, propertyName, configValue, typeof(float), out object result);
                 body.terrainShaderProperties.shaderFloats[propertyName] = (float)result;
             }
+
+            // _TileDisplacementRange controls how far the tiling _DisplacementMap perturbs vertices. If the
+            // body config doesn't specify it, derive a sensible default so existing configs keep working:
+            //   - prefer _NearFieldEnd (so tile bumps fade out exactly where the GPU heightmap takes over)
+            //   - fall back to _MaxTessellationRange (matches the legacy behavior where the two were coupled)
+            // _NearFieldEnd's "disabled" sentinel (~99999999, set when the heightmap isn't configured) is
+            // explicitly ignored so we don't blow tile displacement out to infinity.
+            if (bodyNode.GetValue("_TileDisplacementRange") == null)
+            {
+                var floats = body.terrainShaderProperties.shaderFloats;
+                float nearFieldEnd = floats.TryGetValue("_NearFieldEnd", out var nfe) ? nfe : 0f;
+                float maxTessRange = floats.TryGetValue("_MaxTessellationRange", out var mtr) ? mtr : 0f;
+                bool nearFieldUseful = nearFieldEnd > 0f && nearFieldEnd < 99999999f;
+                floats["_TileDisplacementRange"] = nearFieldUseful ? nearFieldEnd
+                                                  : (maxTessRange > 0f ? maxTessRange : 100f);
+            }
+
             foreach (string propertyName in vectorProperties)
             {
                 string configValue = bodyNode.GetValue(propertyName);

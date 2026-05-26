@@ -244,7 +244,7 @@ namespace Parallax
         }
         public static bool IsArray(string textureName)
         {
-            return textureName == "_PlanetColormap";
+            return textureName == "_PlanetColormap" || textureName == "_PlanetHeightmap";
         }
     }
 
