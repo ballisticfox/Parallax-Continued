@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\GitHub\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj": {}
+    "C:\\Users\\Flame\\OneDrive\\Documents\\GitHub\\Projects\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj": {}
   },
   "projects": {
-    "C:\\GitHub\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj": {
+    "C:\\Users\\Flame\\OneDrive\\Documents\\GitHub\\Projects\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\GitHub\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj",
+        "projectUniqueName": "C:\\Users\\Flame\\OneDrive\\Documents\\GitHub\\Projects\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj",
         "projectName": "ParallaxContinued",
-        "projectPath": "C:\\GitHub\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj",
+        "projectPath": "C:\\Users\\Flame\\OneDrive\\Documents\\GitHub\\Projects\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj",
         "packagesPath": "C:\\Users\\Flame\\.nuget\\packages\\",
-        "outputPath": "C:\\GitHub\\Parallax-Continued\\Mod Source\\Parallax\\obj\\",
+        "outputPath": "C:\\Users\\Flame\\OneDrive\\Documents\\GitHub\\Projects\\Parallax-Continued\\Mod Source\\Parallax\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Flame\\AppData\\Roaming\\NuGet\\NuGet.Config",
@@ -26,6 +26,7 @@
         },
         "frameworks": {
           "net48": {
+            "framework": "net48",
             "targetAlias": "net48",
             "projectReferences": {}
           }
@@ -34,10 +35,17 @@
           "warnAsError": [
             "NU1605"
           ]
-        }
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.200"
       },
       "frameworks": {
         "net48": {
+          "framework": "net48",
           "targetAlias": "net48",
           "dependencies": {
             "Krafs.Publicizer": {
@@ -47,7 +55,7 @@
               "version": "[2.2.1, )"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\7.0.302\\RuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.203\\RuntimeIdentifierGraph.json"
         }
       }
     }

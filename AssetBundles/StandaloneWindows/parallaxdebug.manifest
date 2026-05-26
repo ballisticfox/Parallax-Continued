@@ -1,0 +1,29 @@
+ManifestFileVersion: 0
+CRC: 2784697154
+Hashes:
+  AssetFileHash:
+    serializedVersion: 2
+    Hash: 9c083253bb1a06296cd7c0c5f306b0a1
+  TypeTreeHash:
+    serializedVersion: 2
+    Hash: 55d48f4ad9c3b13330b9eb5ee5686477
+HashAppended: 0
+ClassTypes:
+- Class: 48
+  Script: {instanceID: 0}
+SerializeReferenceClassIdentifiers: []
+Assets:
+- Assets/Shaders/Debug/_Standard.shader
+- Assets/Shaders/Debug/ShowSlope.shader
+- Assets/Shaders/Debug/ShowNormals.shader
+- Assets/Shaders/Debug/DummyBlit.shader
+- Assets/Shaders/Debug/ShowDensity.shader
+- Assets/Shaders/Debug/Billboard.shader
+- Assets/Shaders/Debug/ShowBiomeMap.shader
+- Assets/Shaders/Debug/DebugShadowRaymarch.shader
+- Assets/Shaders/Debug/ShowNoise.shader
+- Assets/Shaders/Debug/DistanceTest.shader
+- Assets/Shaders/Debug/SDF Visualiser.shader
+- Assets/Shaders/Debug/Aniso.shader
+- Assets/Shaders/Debug/ShowNoiseEditor.shader
+Dependencies: []

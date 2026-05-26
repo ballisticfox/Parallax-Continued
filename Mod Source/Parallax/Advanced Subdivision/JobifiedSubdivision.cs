@@ -39,6 +39,7 @@ namespace Parallax
         NativeArray<float3> vertices;                           // Do not dispose until OnDisable
         NativeArray<float3> normals;                            // Do not dispose until OnDisable
         NativeArray<float4> colors;                             // Do not dispose until OnDisable
+        NativeArray<float2> uv3s;                               // Do not dispose until OnDisable. mesh.uv3 = shader TEXCOORD2 (cube face + face UV).
         NativeArray<int> triangles;                             // Do not dispose until OnDisable
 
         // Subdivision data
@@ -53,6 +54,7 @@ namespace Parallax
         NativeArray<float3> newVerts;                           // Dispose after building mesh
         NativeArray<float3> newNormals;                         // Dispose after building mesh
         NativeArray<float4> newColors;                          // Dispose after building mesh
+        NativeArray<float2> newUV3s;                            // Dispose after building mesh
 
         NativeStream newTriangles;                              // Dispose after building mesh
         NativeStream.Writer newTrianglesWriter;                 // Disposed with newTriangles
@@ -97,6 +99,18 @@ namespace Parallax
                 colors[i] = new float4(colorArray[i].r, colorArray[i].g, colorArray[i].b, colorArray[i].a);
             }
 
+            // Mesh.uv3 (shader TEXCOORD2). When PQSMod_PlanetUV isn't running this is empty;
+            // fall back to a zero-initialized array so the subdivision pipeline still works.
+            Vector2[] uv3Array = mesh.uv3;
+            if (uv3Array != null && uv3Array.Length == vertices.Length)
+            {
+                uv3s = new NativeArray<Vector2>(uv3Array, Allocator.Persistent).Reinterpret<float2>();
+            }
+            else
+            {
+                uv3s = new NativeArray<float2>(vertices.Length, Allocator.Persistent);
+            }
+
             triangles = new NativeArray<int>(mesh.triangles, Allocator.Persistent);
 
             storedVertTris = new NativeHashMap<float3, int>(3500, Allocator.Persistent);
@@ -119,7 +133,7 @@ namespace Parallax
                 float3 v1 = vertices[index1];
                 float3 v2 = vertices[index2];
                 float3 v3 = vertices[index3];
-                 
+
                 float3 n1 = normals[index1];
                 float3 n2 = normals[index2];
                 float3 n3 = normals[index3];
@@ -128,7 +142,11 @@ namespace Parallax
                 float4 c2 = colors[index2];
                 float4 c3 = colors[index3];
 
-                SubdividableTriangle tri = new SubdividableTriangle(v1, v2, v3, n1, n2, n3, c1, c2, c3);
+                float2 uv1 = uv3s[index1];
+                float2 uv2 = uv3s[index2];
+                float2 uv3 = uv3s[index3];
+
+                SubdividableTriangle tri = new SubdividableTriangle(v1, v2, v3, n1, n2, n3, c1, c2, c3, uv1, uv2, uv3);
                 meshTriangles[i / 3] = tri;
             }
         }
@@ -226,6 +244,7 @@ namespace Parallax
             newVerts = new NativeArray<float3>(storedVertTris.Length, Allocator.Persistent);
             newNormals = new NativeArray<float3>(storedVertTris.Length, Allocator.Persistent);
             newColors = new NativeArray<float4>(storedVertTris.Length, Allocator.Persistent);
+            newUV3s = new NativeArray<float2>(storedVertTris.Length, Allocator.Persistent);
 
             newTriangles = new NativeStream(meshTriangles.Length, Allocator.Persistent);
             newTrianglesWriter = newTriangles.AsWriter();
@@ -239,6 +258,7 @@ namespace Parallax
                 newVerts = this.newVerts,
                 newNormals = this.newNormals,
                 newColors = this.newColors,
+                newUV3s = this.newUV3s,
                 newTris = this.newTrianglesWriter,
 
                 storedVertTris = this.storedVertTris,
@@ -278,6 +298,7 @@ namespace Parallax
 
             mesh.SetNormals(newNormals);
             mesh.SetColors(newColors);
+            mesh.SetUVs(2, newUV3s);
             this.GetComponent<MeshFilter>().sharedMesh = mesh;
         }
         void FreePostMeshBuildResources()
@@ -285,6 +306,7 @@ namespace Parallax
             newVerts.Dispose();
             newNormals.Dispose();
             newColors.Dispose();
+            newUV3s.Dispose();
             outputTriIndices.Dispose();
             tris.Dispose();
         }
@@ -306,6 +328,7 @@ namespace Parallax
 
             mesh.SetNormals(normals);
             mesh.SetColors(colors);
+            mesh.SetUVs(2, uv3s);
             this.GetComponent<MeshFilter>().sharedMesh = mesh;
         }
         public void Cleanup()
@@ -320,11 +343,13 @@ namespace Parallax
             if (vertices.IsCreated) { vertices.Dispose(); }
             if (normals.IsCreated) { normals.Dispose(); }
             if (colors.IsCreated) { colors.Dispose(); }
+            if (uv3s.IsCreated) { uv3s.Dispose(); }
             if (triangles.IsCreated) { triangles.Dispose(); }
 
             if (newVerts.IsCreated) { newVerts.Dispose(); }
             if (newNormals.IsCreated) { newNormals.Dispose(); }
             if (newColors.IsCreated) { newColors.Dispose(); }
+            if (newUV3s.IsCreated) { newUV3s.Dispose(); }
             if (outputTriIndices.IsCreated) { outputTriIndices.Dispose(); }
 
             if (newTriangles.IsCreated) { newTriangles.Dispose(); }

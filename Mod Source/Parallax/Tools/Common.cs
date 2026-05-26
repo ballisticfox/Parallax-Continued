@@ -190,7 +190,7 @@ namespace Parallax
     public class ParallaxTerrainBody
     {
         public string planetName;
-        public Dictionary<string, TextureHandle<Texture2D>> loadedTextures = [];
+        public Dictionary<string, TextureHandle> loadedTextures = [];
 
         // Terrain materials
         public ParallaxMaterials parallaxMaterials = new ParallaxMaterials();
@@ -325,13 +325,18 @@ namespace Parallax
             {
                 if (loadedTextures.ContainsKey(name))
                     continue;
+                // Empty path means the property was intentionally left unset (e.g. optional Texture2DArray).
+                if (string.IsNullOrEmpty(path))
+                    continue;
 
                 var options = new TextureLoadOptions
                 {
                     Linear = TextureUtils.IsLinear(name),
                     Unreadable = true,
                 };
-                var handle = TextureLoader.LoadTexture<Texture2D>(path, options);
+                TextureHandle handle = TextureUtils.IsArray(name)
+                    ? TextureLoader.LoadTexture<Texture2DArray>(path, options)
+                    : TextureLoader.LoadTexture<Texture2D>(path, options);
                 handle.OnCompleted += ParallaxDebug.LogTextureLoaded;
 
                 loadedTextures.Add(name, handle);
@@ -346,13 +351,17 @@ namespace Parallax
                 return;
             if (!shaderTextures.TryGetValue(name, out var path))
                 return;
-                
+            if (string.IsNullOrEmpty(path))
+                return;
+
             var options = new TextureLoadOptions
             {
                 Linear = TextureUtils.IsLinear(name),
                 Unreadable = true,
             };
-            var handle = TextureLoader.LoadTexture<Texture2D>(path, options);
+            TextureHandle handle = TextureUtils.IsArray(name)
+                ? TextureLoader.LoadTexture<Texture2DArray>(path, options)
+                : TextureLoader.LoadTexture<Texture2D>(path, options);
             handle.OnCompleted += ParallaxDebug.LogTextureLoaded;
 
             loadedTextures.Add(name, handle);
@@ -370,9 +379,11 @@ namespace Parallax
 
             foreach (var name in terrainShaderProperties.shaderTextures.Keys)
             {
-                Texture2D tex;
-                var request = loadedTextures[name];
+                // Property has no path set — skip (handled by shader-side default).
+                if (!loadedTextures.TryGetValue(name, out var request))
+                    continue;
 
+                Texture tex;
                 try
                 {
                     tex = request.GetTexture();
@@ -412,8 +423,11 @@ namespace Parallax
 
             foreach (var name in terrainShaderProperties.shaderTextures.Keys)
             {
-                Texture2D tex;
-                var request = loadedTextures[name];
+                // Property has no path set — skip (handled by shader-side default).
+                if (!loadedTextures.TryGetValue(name, out var request))
+                    continue;
+
+                Texture tex;
 
                 if (!request.IsComplete)
                     yield return request;
@@ -444,7 +458,7 @@ namespace Parallax
             loaded = true;
             isLoading = false;
         }
-        public static Texture2D LoadTexIfUnloaded(ParallaxTerrainBody body, string path, string key)
+        public static Texture LoadTexIfUnloaded(ParallaxTerrainBody body, string path, string key)
         {
             if (!body.loadedTextures.TryGetValue(key, out var handle))
             {
@@ -454,7 +468,9 @@ namespace Parallax
                     Unreadable = true,
                     Hint = TextureLoadHint.Synchronous,
                 };
-                handle = TextureLoader.LoadTexture<Texture2D>(path, options);
+                handle = TextureUtils.IsArray(key)
+                    ? TextureLoader.LoadTexture<Texture2DArray>(path, options)
+                    : TextureLoader.LoadTexture<Texture2D>(path, options);
                 handle.OnCompleted += ParallaxDebug.LogTextureLoaded;
 
                 body.loadedTextures.Add(key, handle);
@@ -716,9 +732,11 @@ namespace Parallax
                     // loading the texture if we need it.
                     terrainBody.StartLoadByName(name);
 
-                    if (terrainBody.loadedTextures.TryGetValue(name, out handle))
+                    // Terrain body's loadedTextures is non-generic (it may hold Texture2DArray for e.g. _PlanetColormap);
+                    // only borrow handles that are actually Texture2D for the scaled body.
+                    if (terrainBody.loadedTextures.TryGetValue(name, out var sharedHandle) && sharedHandle is TextureHandle<Texture2D> tex2DHandle)
                     {
-                        loadedTextures.Add(name, handle.Acquire());
+                        loadedTextures.Add(name, tex2DHandle.Acquire());
                         continue;
                     }
                 }

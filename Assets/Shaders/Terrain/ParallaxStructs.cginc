@@ -34,6 +34,7 @@
         float4 vertex : POSITION;                   \
         float3 normal : NORMAL;                     \
         float3 color : COLOR;                       \
+        float2 texcoord2 : TEXCOORD2;               \
     };
 
 #define PARALLAX_FORWARDBASE_STRUCT_CONTROL         \
@@ -45,6 +46,7 @@
         float3 viewDir : TEXCOORD1;                 \
         float3 color : COLOR;                       \
         float4 landMask : TEXCOORD3;                \
+        float2 texcoord2 : TEXCOORD2;               \
     };
 
 #define PARALLAX_FORWARDBASE_STRUCT_INTERP          \
@@ -55,6 +57,7 @@
         float3 worldNormal : NORMAL;                \
         float3 viewDir : TEXCOORD1;                 \
         float3 color : COLOR;                       \
+        float2 texcoord2 : TEXCOORD2;               \
         LIGHTING_COORDS(4, 5)                       \
         UNITY_FOG_COORDS(6)                         \
     };
@@ -103,6 +106,7 @@
         float4 vertex : POSITION;                   \
         float3 normal : NORMAL;                     \
         float3 color : COLOR;                       \
+        float2 texcoord2 : TEXCOORD2;               \
     };
 
 #define PARALLAX_FORWARDADD_STRUCT_CONTROL          \
@@ -116,6 +120,7 @@
         float4 vertex : TEXCOORD4;                  \
         float4 landMask : TEXCOORD3;                \
         float3 color : COLOR;                       \
+        float2 texcoord2 : TEXCOORD5;               \
     };
 
 #define PARALLAX_FORWARDADD_STRUCT_INTERP           \
@@ -129,4 +134,5 @@
         float3 color : COLOR;                       \
         float4 vertex : TEXCOORD3;                  \
         LIGHTING_COORDS(4, 5)                       \
+        float2 texcoord2 : TEXCOORD6;               \
     };

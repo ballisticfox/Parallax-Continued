@@ -16,6 +16,8 @@ sampler2D _BumpMapSteep;
 sampler2D _DisplacementMap;
 sampler2D _InfluenceMap;
 
+UNITY_DECLARE_TEX2DARRAY(_PlanetColormap);
+
 #if defined (AMBIENT_OCCLUSION)
     sampler2D _OcclusionMap;
 #endif

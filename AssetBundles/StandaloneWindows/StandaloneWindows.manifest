@@ -1,0 +1,10 @@
+ManifestFileVersion: 0
+CRC: 3369573555
+AssetBundleManifest:
+  AssetBundleInfos:
+    Info_0:
+      Name: parallaxdebug
+      Dependencies: {}
+    Info_1:
+      Name: parallaxterrain
+      Dependencies: {}

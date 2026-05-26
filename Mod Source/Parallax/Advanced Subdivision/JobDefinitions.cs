@@ -204,6 +204,8 @@ namespace Parallax
         [WriteOnly] public NativeArray<float3> newNormals;
         [NativeDisableContainerSafetyRestriction]
         [WriteOnly] public NativeArray<float4> newColors;
+        [NativeDisableContainerSafetyRestriction]
+        [WriteOnly] public NativeArray<float2> newUV3s;
 
         [WriteOnly] public NativeStream.Writer newTris;
 
@@ -238,6 +240,10 @@ namespace Parallax
                 newColors[index1] = tri.c1;
                 newColors[index2] = tri.c2;
                 newColors[index3] = tri.c3;
+
+                newUV3s[index1] = tri.uv1;
+                newUV3s[index2] = tri.uv2;
+                newUV3s[index3] = tri.uv3;
 
                 newTris.Write(index1);
                 newTris.Write(index2);

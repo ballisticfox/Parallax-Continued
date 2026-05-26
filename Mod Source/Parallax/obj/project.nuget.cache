@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "WNf0w4MoYmGLAvJpah6jkrfQz58/XfRCLnT/g4D/CsjrBjoy3mmzNKhMPHLliqE8FQfuEJA8XlYn/LLK68rY4Q==",
+  "dgSpecHash": "HN9TFjeHKgM=",
   "success": true,
-  "projectFilePath": "C:\\GitHub\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj",
+  "projectFilePath": "C:\\Users\\Flame\\OneDrive\\Documents\\GitHub\\Projects\\Parallax-Continued\\Mod Source\\Parallax\\Parallax.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Flame\\.nuget\\packages\\krafs.publicizer\\2.2.1\\krafs.publicizer.2.2.1.nupkg.sha512"
   ],

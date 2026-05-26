@@ -36,6 +36,7 @@ Shader "Custom/Parallax"
         _InfluenceMap("Influence Map", 2D) = "white" {}
         _DisplacementMap("Displacement Map", 2D) = "black" {}
         _OcclusionMap("Occlusion Map", 2D) = "white" {}
+        [NoScaleOffset] _PlanetColormap("Planet Colormap (Cube Face Array)", 2DArray) = "white" {}
 
         [Space(10)]
         [Header(Texture Parameters)]
@@ -142,10 +143,11 @@ Shader "Custom/Parallax"
                 o.worldNormal = normalize(mul(unity_ObjectToWorld, v.normal).xyz);
                 o.viewDir = _WorldSpaceCameraPos - o.worldPos;
                 o.color = v.color;
+                o.texcoord2 = v.texcoord2;
                 o.landMask = GetLandMask(o.worldPos, o.worldNormal);
                 return o;
             }
-            TessellationFactors PatchConstantFunction(InputPatch<TessellationControlPoint, 3> patch) 
+            TessellationFactors PatchConstantFunction(InputPatch<TessellationControlPoint, 3> patch)
             {
                 TessellationFactors f;
 
@@ -154,7 +156,7 @@ Shader "Custom/Parallax"
                     // Cull the patch - This should be set to 1 in the shadow caster
                     // Also set to 1 in the pixel shader, because smooth normals can mess with this
                     f.edge[0] = f.edge[1] = f.edge[2] = f.inside = 1;
-                } 
+                }
                 else
                 {
                     float tessFactor0 =  EdgeTessellationFactor(_TessellationEdgeLength.x, 0, patch[1].worldPos, patch[1].pos, patch[2].worldPos, patch[2].pos);
@@ -185,6 +187,7 @@ Shader "Custom/Parallax"
                 o.worldNormal = normalize(BARYCENTRIC_INTERPOLATE(worldNormal));
                 o.viewDir = BARYCENTRIC_INTERPOLATE(viewDir);
                 o.color = BARYCENTRIC_INTERPOLATE(color);
+                o.texcoord2 = BARYCENTRIC_INTERPOLATE(texcoord2);
                 float4 landMask = BARYCENTRIC_INTERPOLATE(landMask);
 
                 float terrainDistance = length(o.viewDir);
@@ -200,18 +203,27 @@ Shader "Custom/Parallax"
                 // Defines 'displacedWorldPos'
                 CALCULATE_VERTEX_DISPLACEMENT(o, landMask, displacementTex);
                 o.pos = UnityWorldToClipPos(displacedWorldPos);
-            
+
                 TRANSFER_VERTEX_TO_FRAGMENT(o);
                 UNITY_TRANSFER_FOG(o,o.pos);
 
                 return o;
             }
             fixed4 Frag_Shader (Interpolators i) : SV_Target
-            {   
+            {
                 float terrainDistance = length(i.viewDir);
 
-                // Maybe gamma correct at some point
-                float3 vertexColor = i.color;
+                float faceIndex = floor(i.texcoord2.x);
+                float2 faceUV = float2(frac(i.texcoord2.x), i.texcoord2.y);
+
+                if (faceIndex == 0)      faceUV = float2(faceUV.y, 1.0 - faceUV.x);  // XP: 90° CCW
+                else if (faceIndex == 1) faceUV = float2(1.0 - faceUV.y, faceUV.x);  // XN: 90° CW
+                else if (faceIndex == 2) faceUV = 1.0 - faceUV;                       // YP: 180°
+                else if (faceIndex == 3) faceUV = 1.0 - faceUV;                       // YN: 180°
+                else if (faceIndex == 4) faceUV = 1.0 - faceUV;                       // ZP: 180°
+                // faceIndex == 5: ZN identity
+
+                float3 vertexColor = UNITY_SAMPLE_TEX2DARRAY(_PlanetColormap, float3(faceUV, faceIndex)).rgb;
 
                 i.worldNormal = normalize(i.worldNormal);
                 float3 viewDir = normalize(i.viewDir);
@@ -451,7 +463,7 @@ Shader "Custom/Parallax"
             TessellationControlPoint Vertex_Shader (appdata v)
             {
                 TessellationControlPoint o;
-        
+
                 o.pos = UnityObjectToClipPos(v.vertex);
                 o.worldPos = mul(unity_ObjectToWorld, v.vertex);
                 o.worldNormal = normalize(mul(unity_ObjectToWorld, v.normal).xyz);
@@ -459,6 +471,7 @@ Shader "Custom/Parallax"
                 o.lightDir = _WorldSpaceLightPos0 - o.worldPos;
                 o.color = v.color;
                 o.vertex = v.vertex;
+                o.texcoord2 = v.texcoord2;
                 o.landMask = GetLandMask(o.worldPos, o.worldNormal);
                 return o;
             }
@@ -505,7 +518,8 @@ Shader "Custom/Parallax"
                 v.color = BARYCENTRIC_INTERPOLATE(color);
                 v.lightDir = BARYCENTRIC_INTERPOLATE(lightDir);
                 v.vertex = BARYCENTRIC_INTERPOLATE(vertex);
-                
+                v.texcoord2 = BARYCENTRIC_INTERPOLATE(texcoord2);
+
                 float4 landMask = BARYCENTRIC_INTERPOLATE(landMask);
 
                 float terrainDistance = length(v.viewDir);
@@ -528,11 +542,20 @@ Shader "Custom/Parallax"
                 return v;
             }
             fixed4 Frag_Shader (Interpolators i) : SV_Target
-            {   
+            {
                 float terrainDistance = length(i.viewDir);
 
-                // Maybe gamma correct at some point
-                float3 vertexColor = i.color;
+                float faceIndex = floor(i.texcoord2.x);
+                float2 faceUV = float2(frac(i.texcoord2.x), i.texcoord2.y);
+
+                if (faceIndex == 0)      faceUV = float2(faceUV.y, 1.0 - faceUV.x);  // XP: 90° CCW
+                else if (faceIndex == 1) faceUV = float2(1.0 - faceUV.y, faceUV.x);  // XN: 90° CW
+                else if (faceIndex == 2) faceUV = 1.0 - faceUV;                       // YP: 180°
+                else if (faceIndex == 3) faceUV = 1.0 - faceUV;                       // YN: 180°
+                else if (faceIndex == 4) faceUV = 1.0 - faceUV;                       // ZP: 180°
+                // faceIndex == 5: ZN identity
+
+                float3 vertexColor = UNITY_SAMPLE_TEX2DARRAY(_PlanetColormap, float3(faceUV, faceIndex)).rgb;
 
                 i.worldNormal = normalize(i.worldNormal);
                 float3 viewDir = normalize(i.viewDir);
@@ -681,6 +704,7 @@ Shader "Custom/Parallax"
                 o.worldNormal = normalize(mul(unity_ObjectToWorld, v.normal).xyz);
                 o.viewDir = _WorldSpaceCameraPos - o.worldPos;
                 o.color = v.color;
+                o.texcoord2 = v.texcoord2;
                 o.landMask = GetLandMask(o.worldPos, o.worldNormal);
                 return o;
             }
@@ -724,6 +748,7 @@ Shader "Custom/Parallax"
                 o.worldNormal = normalize(BARYCENTRIC_INTERPOLATE(worldNormal));
                 o.viewDir = BARYCENTRIC_INTERPOLATE(viewDir);
                 o.color = BARYCENTRIC_INTERPOLATE(color);
+                o.texcoord2 = BARYCENTRIC_INTERPOLATE(texcoord2);
                 float4 landMask = BARYCENTRIC_INTERPOLATE(landMask);
 
                 float terrainDistance = length(o.viewDir);
@@ -746,11 +771,20 @@ Shader "Custom/Parallax"
                 return o;
             }
             void Frag_Shader (Interpolators i, PARALLAX_DEFERRED_OUTPUT_BUFFERS)
-            {   
+            {
                 float terrainDistance = length(i.viewDir);
 
-                // Maybe gamma correct at some point
-                float3 vertexColor = i.color;
+                float faceIndex = floor(i.texcoord2.x);
+                float2 faceUV = float2(frac(i.texcoord2.x), i.texcoord2.y);
+
+                if (faceIndex == 0)      faceUV = float2(faceUV.y, 1.0 - faceUV.x);  // XP: 90° CCW
+                else if (faceIndex == 1) faceUV = float2(1.0 - faceUV.y, faceUV.x);  // XN: 90° CW
+                else if (faceIndex == 2) faceUV = 1.0 - faceUV;                       // YP: 180°
+                else if (faceIndex == 3) faceUV = 1.0 - faceUV;                       // YN: 180°
+                else if (faceIndex == 4) faceUV = 1.0 - faceUV;                       // ZP: 180°
+                // faceIndex == 5: ZN identity
+
+                float3 vertexColor = UNITY_SAMPLE_TEX2DARRAY(_PlanetColormap, float3(faceUV, faceIndex)).rgb;
 
                 i.worldNormal = normalize(i.worldNormal);
                 float3 viewDir = normalize(i.viewDir);

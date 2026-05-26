@@ -456,6 +456,14 @@ namespace Parallax
                 string configValue = bodyNode.GetValue(propertyName);
                 if (configValue == null)
                 {
+                    // Texture2DArray textures (e.g. _PlanetColormap) have no scalar white.dds fallback;
+                    // leave the path empty and let the loader skip them so the shader's built-in default is used.
+                    if (TextureUtils.IsArray(propertyName))
+                    {
+                        body.terrainShaderProperties.shaderTextures[propertyName] = "";
+                        continue;
+                    }
+
                     // Default to this texture if the requested texture couldn't be found
                     Debug.Log("No texture (" + propertyName + ") found on " + body.planetName + ", setting it to default white");
                     configValue = "ParallaxContinued/white.dds";

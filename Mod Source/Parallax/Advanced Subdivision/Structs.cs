@@ -14,11 +14,15 @@ namespace Parallax
         public float3 v1, v2, v3;
         public float3 n1, n2, n3;
         public float4 c1, c2, c3;
-        public SubdividableTriangle(float3 v1, float3 v2, float3 v3, float3 n1, float3 n2, float3 n3, float4 c1, float4 c2, float4 c3)
+        // mesh.uv3 (shader TEXCOORD2): cube-face index packed into x's integer part, face-u in fractional part, face-v in y.
+        // PQS quads stay within a single face, so linear interpolation of the packed value works.
+        public float2 uv1, uv2, uv3;
+        public SubdividableTriangle(float3 v1, float3 v2, float3 v3, float3 n1, float3 n2, float3 n3, float4 c1, float4 c2, float4 c3, float2 uv1, float2 uv2, float2 uv3)
         {
             this.v1 = v1; this.v2 = v2; this.v3 = v3;
             this.n1 = n1; this.n2 = n2; this.n3 = n3;
             this.c1 = c1; this.c2 = c2; this.c3 = c3;
+            this.uv1 = uv1; this.uv2 = uv2; this.uv3 = uv3;
         }
         public void Subdivide(ref NativeStream.Writer tris, in int level, in float3 target, in int maxSubdivisionLevel, in float subdivisionRange, in float4x4 objectToWorld)
         {
@@ -52,8 +56,9 @@ namespace Parallax
                     float3 midPointV = GetVertexBetween(v2, v3);
                     float3 midPointN = GetNormalBetween(n2, n3);
                     float4 midPointC = GetColorBetween(c2, c3);
-                    SubdividableTriangle v3v1midPoint = new SubdividableTriangle(v3, v1, midPointV, n3, n1, midPointN, c3, c1, midPointC);
-                    SubdividableTriangle v1v2midPoint = new SubdividableTriangle(v1, v2, midPointV, n1, n2, midPointN, c1, c2, midPointC);
+                    float2 midPointT = GetUVBetween(uv2, uv3);
+                    SubdividableTriangle v3v1midPoint = new SubdividableTriangle(v3, v1, midPointV, n3, n1, midPointN, c3, c1, midPointC, uv3, uv1, midPointT);
+                    SubdividableTriangle v1v2midPoint = new SubdividableTriangle(v1, v2, midPointV, n1, n2, midPointN, c1, c2, midPointC, uv1, uv2, midPointT);
                     tris.Write(v3v1midPoint);
                     tris.Write(v1v2midPoint);
                     return;
@@ -63,8 +68,9 @@ namespace Parallax
                     float3 midPointV = GetVertexBetween(v1, v3);
                     float3 midPointN = GetNormalBetween(n1, n3);
                     float4 midPointC = GetColorBetween(c1, c3);
-                    SubdividableTriangle v1v2midPoint = new SubdividableTriangle(v1, v2, midPointV, n1, n2, midPointN, c1, c2, midPointC);
-                    SubdividableTriangle v2v3midPoint = new SubdividableTriangle(v2, v3, midPointV, n2, n3, midPointN, c2, c3, midPointC);
+                    float2 midPointT = GetUVBetween(uv1, uv3);
+                    SubdividableTriangle v1v2midPoint = new SubdividableTriangle(v1, v2, midPointV, n1, n2, midPointN, c1, c2, midPointC, uv1, uv2, midPointT);
+                    SubdividableTriangle v2v3midPoint = new SubdividableTriangle(v2, v3, midPointV, n2, n3, midPointN, c2, c3, midPointC, uv2, uv3, midPointT);
                     tris.Write(v1v2midPoint);
                     tris.Write(v2v3midPoint);
                     return;
@@ -74,8 +80,9 @@ namespace Parallax
                     float3 midPointV = GetVertexBetween(v1, v2);
                     float3 midPointN = GetNormalBetween(n1, n2);
                     float4 midPointC = GetColorBetween(c1, c2);
-                    SubdividableTriangle v3v1midPoint = new SubdividableTriangle(v3, v1, midPointV, n3, n1, midPointN, c3, c1, midPointC);
-                    SubdividableTriangle v2v3midPoint = new SubdividableTriangle(v2, v3, midPointV, n2, n3, midPointN, c2, c3, midPointC);
+                    float2 midPointT = GetUVBetween(uv1, uv2);
+                    SubdividableTriangle v3v1midPoint = new SubdividableTriangle(v3, v1, midPointV, n3, n1, midPointN, c3, c1, midPointC, uv3, uv1, midPointT);
+                    SubdividableTriangle v2v3midPoint = new SubdividableTriangle(v2, v3, midPointV, n2, n3, midPointN, c2, c3, midPointC, uv2, uv3, midPointT);
                     tris.Write(v3v1midPoint);
                     tris.Write(v2v3midPoint);
                     return;
@@ -109,7 +116,11 @@ namespace Parallax
             float4 tc2 = GetColorBetween(c3, c2);
             float4 tc3 = c3;
 
-            SubdividableTriangle t = new SubdividableTriangle(tv1, tv2, tv3, tn1, tn2, tn3, tc1, tc2, tc3);
+            float2 tuv1 = GetUVBetween(this.uv1, this.uv3);
+            float2 tuv2 = GetUVBetween(this.uv3, this.uv2);
+            float2 tuv3 = this.uv3;
+
+            SubdividableTriangle t = new SubdividableTriangle(tv1, tv2, tv3, tn1, tn2, tn3, tc1, tc2, tc3, tuv1, tuv2, tuv3);
             t.Subdivide(ref tris, level + 1, target, maxSubdivisionLevel, subdivisionRange, objectToWorld);
 
             // Lower left
@@ -125,7 +136,11 @@ namespace Parallax
             float4 blc2 = GetColorBetween(c1, c2);
             float4 blc3 = GetColorBetween(c1, c3);
 
-            SubdividableTriangle bl = new SubdividableTriangle(blv1, blv2, blv3, bln1, bln2, bln3, blc1, blc2, blc3);
+            float2 bluv1 = this.uv1;
+            float2 bluv2 = GetUVBetween(this.uv1, this.uv2);
+            float2 bluv3 = GetUVBetween(this.uv1, this.uv3);
+
+            SubdividableTriangle bl = new SubdividableTriangle(blv1, blv2, blv3, bln1, bln2, bln3, blc1, blc2, blc3, bluv1, bluv2, bluv3);
             bl.Subdivide(ref tris, level + 1, target, maxSubdivisionLevel, subdivisionRange, objectToWorld);
 
             // Lower right
@@ -141,7 +156,11 @@ namespace Parallax
             float4 brc2 = c2;
             float4 brc3 = GetColorBetween(c3, c2);
 
-            SubdividableTriangle br = new SubdividableTriangle(brv1, brv2, brv3, brn1, brn2, brn3, brc1, brc2, brc3);
+            float2 bruv1 = GetUVBetween(this.uv1, this.uv2);
+            float2 bruv2 = this.uv2;
+            float2 bruv3 = GetUVBetween(this.uv3, this.uv2);
+
+            SubdividableTriangle br = new SubdividableTriangle(brv1, brv2, brv3, brn1, brn2, brn3, brc1, brc2, brc3, bruv1, bruv2, bruv3);
             br.Subdivide(ref tris, level + 1, target, maxSubdivisionLevel, subdivisionRange, objectToWorld);
 
             // Center tri
@@ -157,7 +176,11 @@ namespace Parallax
             float4 cc2 = GetColorBetween(c2, c3);
             float4 cc3 = GetColorBetween(c3, c1);
 
-            SubdividableTriangle c = new SubdividableTriangle(cv1, cv2, cv3, cn1, cn2, cn3, cc1, cc2, cc3);
+            float2 cuv1 = GetUVBetween(this.uv1, this.uv2);
+            float2 cuv2 = GetUVBetween(this.uv2, this.uv3);
+            float2 cuv3 = GetUVBetween(this.uv3, this.uv1);
+
+            SubdividableTriangle c = new SubdividableTriangle(cv1, cv2, cv3, cn1, cn2, cn3, cc1, cc2, cc3, cuv1, cuv2, cuv3);
             c.Subdivide(ref tris, level + 1, target, maxSubdivisionLevel, subdivisionRange, objectToWorld);
 
             if (level == subdivisionLevelv1 && level == subdivisionLevelv2 && level == subdivisionLevelv3)
@@ -226,6 +249,10 @@ namespace Parallax
             return (v1 + v2) * 0.5f;
         }
         public float4 GetColorBetween(in float4 v1, in float4 v2)
+        {
+            return (v1 + v2) * 0.5f;
+        }
+        public float2 GetUVBetween(in float2 v1, in float2 v2)
         {
             return (v1 + v2) * 0.5f;
         }
