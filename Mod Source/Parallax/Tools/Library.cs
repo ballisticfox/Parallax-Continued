@@ -242,10 +242,6 @@ namespace Parallax
             }
             return false;
         }
-        public static bool IsArray(string textureName)
-        {
-            return textureName == "_PlanetColormap" || textureName == "_PlanetHeightmap";
-        }
     }
 
     public static class MatrixUtils

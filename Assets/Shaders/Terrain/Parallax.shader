@@ -41,19 +41,30 @@ Shader "Custom/Parallax"
         _InfluenceMap("Influence Map", 2D) = "white" {}
         _DisplacementMap("Displacement Map", 2D) = "black" {}
         _OcclusionMap("Occlusion Map", 2D) = "white" {}
-        [NoScaleOffset] _PlanetColormap("Planet Colormap (Cube Face Array)", 2DArray) = "white" {}
+
+        // Virtual texture pyramid bindings. All auto-set by the C# TileCache loader at runtime.
+        [HideInInspector] _ColorTileAtlas("Color Tile Atlas", 2D) = "white" {}
+        [HideInInspector] _ColorPageTable("Color Page Table", 2D) = "black" {}
+        [HideInInspector] _ColorTileAtlasSize("Color Tile Atlas Size", Float) = 8192
+        [HideInInspector] _ColorTileSize("Color Tile Size", Float) = 256
+        [HideInInspector] _ColorTileBorder("Color Tile Border", Float) = 4
+        [HideInInspector] _ColorMaxTileLevel("Color Max Tile Level", Float) = 3
+
+        [HideInInspector] _HeightTileAtlas("Height Tile Atlas", 2D) = "black" {}
+        [HideInInspector] _HeightPageTable("Height Page Table", 2D) = "black" {}
+        [HideInInspector] _HeightTileAtlasSize("Height Tile Atlas Size", Float) = 8192
+        [HideInInspector] _HeightTileSize("Height Tile Size", Float) = 256
+        [HideInInspector] _HeightTileBorder("Height Tile Border", Float) = 4
+        [HideInInspector] _HeightMaxTileLevel("Height Max Tile Level", Float) = 3
 
         [Space(10)]
         [Header(GPU Heightmap Displacement)]
         [Space(10)]
-        [NoScaleOffset] _PlanetHeightmap("Planet Heightmap (Cube Face Array)", 2DArray) = "black" {}
         _HeightScale("Height Scale (meters)", Float) = 0
         _HeightOffset("Height Offset (meters)", Float) = 0
         // Large default disables GPU displacement until the C# side sets it (blendFactor stays 0).
         _NearFieldEnd("Near Field End (meters)", Float) = 99999999
         _BlendWidth("Blend Width (meters)", Float) = 1
-        // Auto-set by the C# loader from the loaded heightmap's width.
-        [HideInInspector] _HeightmapResolution("Heightmap Resolution (texels)", Float) = 4096
 
         [Space(10)]
         [Header(Texture Parameters)]
@@ -116,6 +127,7 @@ Shader "Custom/Parallax"
             #pragma multi_compile_local _          ADVANCED_BLENDING
             #pragma multi_compile_local _          EMISSION
             #pragma multi_compile_fog
+            #pragma multi_compile _ PARALLAX_VT_DEBUG
             //#pragma skip_variants POINT_COOKIE LIGHTMAP_ON DIRLIGHTMAP_COMBINED DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING VERTEXLIGHT_ON
 
             #include "UnityCG.cginc"
@@ -243,7 +255,20 @@ Shader "Custom/Parallax"
                 else if (faceIndex == 4) faceUV = 1.0 - faceUV;                       // ZP: 180°
                 // faceIndex == 5: ZN identity
 
-                float3 vertexColor = UNITY_SAMPLE_TEX2DARRAY(_PlanetColormap, float3(faceUV, faceIndex)).rgb;
+                #if defined(PARALLAX_VT_DEBUG)
+                {
+                    float screenPixelUV = max(length(ddx(faceUV)), length(ddy(faceUV)));
+                    int desiredLevel = (int)floor(-log2(max(screenPixelUV * _ColorTileSize, 1e-12)));
+                    int displayLevel;
+                    if (_VTDebugMode > 0.5)
+                        displayLevel = clamp(desiredLevel, 0, (int)_ColorMaxTileLevel);
+                    else
+                        displayLevel = GetVTResidentLevel(_ColorPageTable, _ColorMaxTileLevel, faceUV, faceIndex, desiredLevel);
+                    return float4(VTLevelColor(displayLevel), 1.0);
+                }
+                #endif
+
+                float3 vertexColor = SampleColormapVT(faceUV, faceIndex);
 
                 i.worldNormal = normalize(i.worldNormal);
                 float3 viewDir = normalize(i.viewDir);
@@ -454,6 +479,7 @@ Shader "Custom/Parallax"
             #pragma multi_compile_local           PARALLAX_SINGLE_LOW PARALLAX_SINGLE_MID PARALLAX_SINGLE_HIGH PARALLAX_DOUBLE_LOWMID PARALLAX_DOUBLE_MIDHIGH PARALLAX_FULL
             #pragma multi_compile_local _         INFLUENCE_MAPPING
             #pragma multi_compile_fog
+            #pragma multi_compile _ PARALLAX_VT_DEBUG
             #pragma multi_compile_fwdadd_fullshadows
         
             #pragma vertex Vertex_Shader
@@ -581,7 +607,20 @@ Shader "Custom/Parallax"
                 else if (faceIndex == 4) faceUV = 1.0 - faceUV;                       // ZP: 180°
                 // faceIndex == 5: ZN identity
 
-                float3 vertexColor = UNITY_SAMPLE_TEX2DARRAY(_PlanetColormap, float3(faceUV, faceIndex)).rgb;
+                #if defined(PARALLAX_VT_DEBUG)
+                {
+                    float screenPixelUV = max(length(ddx(faceUV)), length(ddy(faceUV)));
+                    int desiredLevel = (int)floor(-log2(max(screenPixelUV * _ColorTileSize, 1e-12)));
+                    int displayLevel;
+                    if (_VTDebugMode > 0.5)
+                        displayLevel = clamp(desiredLevel, 0, (int)_ColorMaxTileLevel);
+                    else
+                        displayLevel = GetVTResidentLevel(_ColorPageTable, _ColorMaxTileLevel, faceUV, faceIndex, desiredLevel);
+                    return float4(VTLevelColor(displayLevel), 1.0);
+                }
+                #endif
+
+                float3 vertexColor = SampleColormapVT(faceUV, faceIndex);
 
                 i.worldNormal = normalize(i.worldNormal);
                 float3 viewDir = normalize(i.viewDir);
@@ -688,6 +727,7 @@ Shader "Custom/Parallax"
             #pragma multi_compile_local _          AMBIENT_OCCLUSION
             #pragma multi_compile_fog
             #pragma multi_compile _ UNITY_HDR_ON
+            #pragma multi_compile _ PARALLAX_VT_DEBUG
 
             #include "UnityCG.cginc"
             #include "Lighting.cginc"
@@ -812,7 +852,31 @@ Shader "Custom/Parallax"
                 else if (faceIndex == 4) faceUV = 1.0 - faceUV;                       // ZP: 180°
                 // faceIndex == 5: ZN identity
 
-                float3 vertexColor = UNITY_SAMPLE_TEX2DARRAY(_PlanetColormap, float3(faceUV, faceIndex)).rgb;
+                #if defined(PARALLAX_VT_DEBUG)
+                {
+                    float screenPixelUV = max(length(ddx(faceUV)), length(ddy(faceUV)));
+                    int desiredLevel = (int)floor(-log2(max(screenPixelUV * _ColorTileSize, 1e-12)));
+                    int displayLevel;
+                    if (_VTDebugMode > 0.5)
+                        displayLevel = clamp(desiredLevel, 0, (int)_ColorMaxTileLevel);
+                    else
+                        displayLevel = GetVTResidentLevel(_ColorPageTable, _ColorMaxTileLevel, faceUV, faceIndex, desiredLevel);
+                    half3 dbgCol = VTLevelColor(displayLevel);
+                    // G-buffer: zero diffuse / spec, up-pointing normal — push debug colour through emission so it
+                    // reads as a flat unlit fill regardless of lighting state.
+                    outGBuffer0 = half4(0, 0, 0, 1);
+                    outGBuffer1 = half4(0, 0, 0, 0);
+                    outGBuffer2 = half4(0.5, 0.5, 1, 0);
+                    #ifdef UNITY_HDR_ON
+                        outEmission = half4(dbgCol, 1);
+                    #else
+                        outEmission = half4(exp2(-dbgCol), 1);
+                    #endif
+                    return;
+                }
+                #endif
+
+                float3 vertexColor = SampleColormapVT(faceUV, faceIndex);
 
                 i.worldNormal = normalize(i.worldNormal);
                 float3 viewDir = normalize(i.viewDir);

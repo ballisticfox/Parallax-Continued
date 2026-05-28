@@ -49,55 +49,70 @@ float MitchellNetravali1D(float x)
     return 0.0;
 }
 
-// Heightmap-specific helpers live behind the SCALED guard because _PlanetHeightmap,
-// _HeightmapResolution, _HeightOffset, _HeightScale, _NearFieldEnd and _BlendWidth are only
-// declared in the terrain-side ParallaxVariables.cginc — the scaled shader doesn't use them.
+// Heightmap-specific helpers live behind the SCALED guard because the heightmap VT uniforms,
+// _HeightOffset, _HeightScale, _NearFieldEnd and _BlendWidth are only declared in the terrain-side
+// ParallaxVariables.cginc — the scaled shader doesn't use them.
 #if !defined (SCALED)
 
-// 16-tap (4x4) Mitchell-Netravali sample of _PlanetHeightmap on the given face slice.
-// Currently NOT called — ApplyGPUHeightmapDisplacement uses a single bilinear sample. Kept here so it can be
-// re-enabled by swapping the sample call below. When used, the heightmap MUST be loaded with filterMode=Point
-// (so taps return raw texels instead of pre-blended bilinear) and wrapMode=Clamp.
-float SampleHeightmapMitchellLOD0(float2 uv, float faceIndex)
+// Virtual texture pyramid sampler. Walks the page table starting at startLevel, falls back to coarser
+// levels when a tile isn't loaded, and remaps the within-tile UV into the cache atlas accounting for
+// the per-tile border. Inputs are the corrected face UV (post-CorrectFaceUV) and the face index.
+// Uses tex2Dlod for both the page table (point sampling — exact texel lookup) and the atlas (LOD 0,
+// bilinear filter from the texture's sampler state) so this is safe to call from any shader stage.
+float4 SampleVTPyramid(
+    sampler2D atlas, sampler2D pageTable,
+    float atlasSize, float tileSize, float tileBorder, float maxLevelF,
+    float2 faceUV, float faceIndex, int startLevel)
 {
-    float texSize = _HeightmapResolution;
-    float invTexSize = 1.0 / texSize;
+    int maxLevel = (int)maxLevelF;
+    int faceStride = 1 << maxLevel;
+    float slotSize = tileSize + 2.0 * tileBorder;
+    float invAtlas = 1.0 / atlasSize;
+    int faceIdx = (int)faceIndex;
 
-    // Convert UV to texel-grid space: (0,0) is the corner of texel (0,0), texel centers are at integer + 0.5.
-    // Subtracting 0.5 puts us in "distance from nearest lower-left texel center" space.
-    float2 pixelPos = uv * texSize - 0.5;
-    float2 pixelInt = floor(pixelPos);
-    float2 pixelFrac = pixelPos - pixelInt;
+    int desiredLevel = clamp(startLevel, 0, maxLevel);
+    float2 pageDim = float2(6.0 * faceStride, (1 << (maxLevel + 1)) - 1);
 
-    float result = 0.0;
-
+    // Walk from desiredLevel up to level 0 looking for a loaded tile.
     [unroll]
-    for (int j = -1; j <= 2; j++)
+    for (int attempt = 0; attempt <= 16; attempt++)
     {
-        [unroll]
-        for (int i = -1; i <= 2; i++)
-        {
-            // Sample at the center of texel (pixelInt + (i,j)), clamped to stay inside the face slice.
-            float2 sampleUV = (pixelInt + float2(i, j) + 0.5) * invTexSize;
-            sampleUV = clamp(sampleUV, 0.5 * invTexSize, 1.0 - 0.5 * invTexSize);
+        int level = desiredLevel - attempt;
+        if (level < 0) break;
 
-            float h = UNITY_SAMPLE_TEX2DARRAY_LOD(_PlanetHeightmap, float3(sampleUV, faceIndex), 0).r;
-            float wx = MitchellNetravali1D((float)i - pixelFrac.x);
-            float wy = MitchellNetravali1D((float)j - pixelFrac.y);
-            result += h * wx * wy;
+        int gridSize = 1 << level;
+        int2 tileCoord = clamp((int2)(faceUV * gridSize), int2(0, 0), int2(gridSize - 1, gridSize - 1));
+
+        int yStart = (1 << level) - 1;
+        int2 pageCoord = int2(faceIdx * faceStride + tileCoord.x, yStart + tileCoord.y);
+        // Page table: point-sampled. +0.5 hits the texel center; the C# loader sets filter=Point/wrap=Clamp.
+        float2 pageUV = (float2(pageCoord) + 0.5) / pageDim;
+        float4 page = tex2Dlod(pageTable, float4(pageUV, 0, 0));
+
+        if (page.a > 0.5)
+        {
+            // Slot index encoded as bytes (0..255) in R/G of the page texel.
+            float2 slot = floor(page.rg * 255.0 + 0.5);
+
+            // UV within this tile → atlas UV (skip the border padding around each slot).
+            float2 withinTileUV = frac(faceUV * gridSize);
+            float2 atlasPx = slot * slotSize + tileBorder + withinTileUV * tileSize;
+            return tex2Dlod(atlas, float4(atlasPx * invAtlas, 0, 0));
         }
     }
 
-    return result;
+    // No tile loaded at any level on this face — debug magenta so misses are obvious.
+    return float4(1.0, 0.0, 1.0, 0.0);
 }
 
 //
 //  GPU Heightmap Displacement
-//  Overrides the vertex radial position with a value sampled from _PlanetHeightmap when the vertex is far from camera.
-//  Blend strip controlled by _NearFieldEnd / _BlendWidth keeps PQS geometry near the craft (for collision accuracy).
-//  Called in Domain_Shader (post-tessellation) so tessellated vertices get freshly sampled heights instead of
-//  linear interpolation of already-displaced corners — important for capturing heightmap detail on coarse
-//  far-field PQS quads when _MaxTessellationRange is stretched out.
+//  Overrides the vertex radial position with a value sampled from the heightmap VT pyramid when the
+//  vertex is far from camera. Blend strip controlled by _NearFieldEnd / _BlendWidth keeps PQS geometry
+//  near the craft (for collision accuracy). Called in Domain_Shader (post-tessellation) so tessellated
+//  vertices get freshly sampled heights instead of linear interpolation of already-displaced corners —
+//  important for capturing heightmap detail on coarse far-field PQS quads when _MaxTessellationRange is
+//  stretched out.
 //
 float3 ApplyGPUHeightmapDisplacement(float3 worldPos, float2 texcoord2)
 {
@@ -113,15 +128,74 @@ float3 ApplyGPUHeightmapDisplacement(float3 worldPos, float2 texcoord2)
     UnpackFaceUV(texcoord2, faceIndex, faceUV);
     faceUV = CorrectFaceUV(faceUV, faceIndex);
 
-    // Bilinear sample via the default sampler. Swap for SampleHeightmapMitchellLOD0(faceUV, faceIndex)
-    // to match the CPU-side Mitchell-Netravali filter (also flip filterMode back to Point in the C# loader).
-    float sampledHeight = UNITY_SAMPLE_TEX2DARRAY_LOD(_PlanetHeightmap, float3(faceUV, faceIndex), 0).r;
-    float targetRadius = _PlanetRadius + _HeightOffset + sampledHeight * _HeightScale;
+    // Vertex stage can't use ddx/ddy, so we ask for the deepest level we have and let the page-table
+    // walk-up settle on whatever coarser tile is actually loaded for this (face, x, y).
+    float sampledHeight = SampleVTPyramid(
+        _HeightTileAtlas, _HeightPageTable,
+        _HeightTileAtlasSize, _HeightTileSize, _HeightTileBorder, _HeightMaxTileLevel,
+        faceUV, faceIndex, (int)_HeightMaxTileLevel).r;
 
+    float targetRadius = _PlanetRadius + _HeightOffset + sampledHeight * _HeightScale;
     float3 dirFromCenter = normalize(worldPos - _PlanetOrigin);
     float3 correctedWorldPos = _PlanetOrigin + dirFromCenter * targetRadius;
 
     return lerp(worldPos, correctedWorldPos, blendFactor);
+}
+
+// Fragment-stage colormap sample. Derives the desired pyramid level from screen-space UV derivatives so
+// distant geometry pulls coarse tiles and close-up geometry pulls fine ones. Inputs are the corrected
+// face UV (post-CorrectFaceUV) and the face index.
+float3 SampleColormapVT(float2 faceUV, float faceIndex)
+{
+    float screenPixelUV = max(length(ddx(faceUV)), length(ddy(faceUV)));
+    int desiredLevel = (int)floor(-log2(max(screenPixelUV * _ColorTileSize, 1e-12)));
+
+    return SampleVTPyramid(
+        _ColorTileAtlas, _ColorPageTable,
+        _ColorTileAtlasSize, _ColorTileSize, _ColorTileBorder, _ColorMaxTileLevel,
+        faceUV, faceIndex, desiredLevel).rgb;
+}
+
+// Walks the color page table and returns the highest level that is actually resident,
+// starting from startLevel and falling back toward 0. Returns -1 if nothing is loaded.
+// Used by PARALLAX_VT_DEBUG to colour terrain by streaming quality without reading the atlas.
+int GetVTResidentLevel(sampler2D pageTable, float maxLevelF, float2 faceUV, float faceIndex, int startLevel)
+{
+    int maxLevel     = (int)maxLevelF;
+    int faceStride   = 1 << maxLevel;
+    int faceIdx      = (int)faceIndex;
+    int desiredLevel = clamp(startLevel, 0, maxLevel);
+    float2 pageDim   = float2(6.0 * faceStride, (float)((1 << (maxLevel + 1)) - 1));
+
+    [unroll]
+    for (int attempt = 0; attempt <= 16; attempt++)
+    {
+        int level = desiredLevel - attempt;
+        if (level < 0) break;
+
+        int gridSize    = 1 << level;
+        int2 tileCoord  = clamp((int2)(faceUV * gridSize), int2(0, 0), int2(gridSize - 1, gridSize - 1));
+        int  yStart     = (1 << level) - 1;
+        int2 pageCoord  = int2(faceIdx * faceStride + tileCoord.x, yStart + tileCoord.y);
+        float2 pageUV   = (float2(pageCoord) + 0.5) / pageDim;
+        float4 page     = tex2Dlod(pageTable, float4(pageUV, 0, 0));
+        if (page.a > 0.5) return level;
+    }
+    return -1;
+}
+
+// Maps a resident VT level to a debug colour. Warm = coarse, cool = fine.
+// red=0, orange=1, yellow=2, lime=3, green=4, cyan=5, blue=6+, magenta=missing.
+float3 VTLevelColor(int level)
+{
+    if (level == 0) return float3(1.0, 0.0, 0.0);  // red
+    if (level == 1) return float3(1.0, 0.5, 0.0);  // orange
+    if (level == 2) return float3(1.0, 1.0, 0.0);  // yellow
+    if (level == 3) return float3(0.5, 1.0, 0.0);  // lime
+    if (level == 4) return float3(0.0, 1.0, 0.0);  // green
+    if (level == 5) return float3(0.0, 1.0, 1.0);  // cyan
+    if (level >= 6) return float3(0.0, 0.4, 1.0);  // blue
+    return float3(1.0, 0.0, 1.0);                  // magenta — no tile loaded
 }
 
 #endif // !SCALED
@@ -232,7 +306,7 @@ float3 CalculatePhongPosition(float3 bary, float3 p0PositionWS, float3 p0NormalW
 }
 
 #define CALCULATE_VERTEX_DISPLACEMENT(o, landMask, displacementTex)                                                                                                 \
-    float displacementRange = 1 - min(1, terrainDistance / _TileDisplacementRange);                                                                                 \
+    float displacementRange = 1 - min(1, terrainDistance / max(_TileDisplacementRange, 1.0));                                                                      \
     float displacement = BLEND_CHANNELS_IN_TEX(landMask, displacementTex);                                                                                          \
     float displacementOffset = _DisplacementOffset;                                                                                                                 \
     displacement = lerp(displacement, displacementTex.a, landMask.b);                                                                                               \

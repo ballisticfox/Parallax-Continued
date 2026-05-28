@@ -432,12 +432,44 @@ namespace Parallax
                     {
                         ParseNewScaledBody(body, scaledBodyNode);
                     }
-                    
+
+                    // Parse the virtual texture cache config. A body must have a VirtualTexture block to
+                    // get colormap / heightmap textures — that's how those are delivered now.
+                    ConfigNode vtNode = planetNode.GetNode("VirtualTexture");
+                    if (vtNode != null)
+                    {
+                        body.virtualTextureConfig = ParseVirtualTextureConfig(vtNode, planetName);
+                    }
+
                     body.LoadInitial();
                     parallaxTerrainBodies.Add(planetName, body);
                 }
             }
         }
+        // Parses a "VirtualTexture" subnode of ParallaxTerrain.Body into a VirtualTextureConfig.
+        // At least one of colormapTilePath / heightmapTilePath must be set; the rest defaults to
+        // slice_tiles.py's defaults.
+        private static VirtualTextureConfig ParseVirtualTextureConfig(ConfigNode node, string planetName)
+        {
+            var cfg = new VirtualTextureConfig();
+
+            cfg.colormapTilePath  = node.GetValue("colormapTilePath");
+            cfg.heightmapTilePath = node.GetValue("heightmapTilePath");
+            if (!cfg.IsValid)
+            {
+                ParallaxDebug.LogCritical($"VirtualTexture block on {planetName} has neither 'colormapTilePath' nor 'heightmapTilePath' set — ignoring.");
+                return null;
+            }
+
+            string s;
+            if ((s = node.GetValue("atlasSize")) != null && int.TryParse(s, out var i1)) cfg.atlasSize = i1;
+            if ((s = node.GetValue("tileSize"))  != null && int.TryParse(s, out var i2)) cfg.tileSize  = i2;
+            if ((s = node.GetValue("borderPx"))  != null && int.TryParse(s, out var i3)) cfg.borderPx  = i3;
+            if ((s = node.GetValue("maxLevel"))  != null && int.TryParse(s, out var i4)) cfg.maxLevel  = i4;
+
+            return cfg;
+        }
+
         public static void ParseNewBody(ParallaxTerrainBody body, ConfigNode bodyNode)
         {
             // Grab the template
@@ -456,14 +488,6 @@ namespace Parallax
                 string configValue = bodyNode.GetValue(propertyName);
                 if (configValue == null)
                 {
-                    // Texture2DArray textures (e.g. _PlanetColormap) have no scalar white.dds fallback;
-                    // leave the path empty and let the loader skip them so the shader's built-in default is used.
-                    if (TextureUtils.IsArray(propertyName))
-                    {
-                        body.terrainShaderProperties.shaderTextures[propertyName] = "";
-                        continue;
-                    }
-
                     // Default to this texture if the requested texture couldn't be found
                     Debug.Log("No texture (" + propertyName + ") found on " + body.planetName + ", setting it to default white");
                     configValue = "ParallaxContinued/white.dds";

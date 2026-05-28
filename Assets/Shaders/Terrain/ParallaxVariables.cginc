@@ -16,16 +16,32 @@ sampler2D _BumpMapSteep;
 sampler2D _DisplacementMap;
 sampler2D _InfluenceMap;
 
-UNITY_DECLARE_TEX2DARRAY(_PlanetColormap);
-UNITY_DECLARE_TEX2DARRAY(_PlanetHeightmap);
+// Virtual texture pyramid for the planet COLORMAP (fragment-shader sample).
+// Atlas: cache Texture2D holding loaded tiles packed into a grid of (_ColorTileSize + 2*_ColorTileBorder) slots.
+// PageTable: small Texture2D where each texel = (slotX, slotY, _, loaded) for one (face, level, tileX, tileY).
+//            Layout: levels stacked vertically (L0=row 0, L1=rows 1-2, ...); faces tiled horizontally with
+//            stride (1 << _ColorMaxTileLevel).
+sampler2D _ColorTileAtlas;
+sampler2D _ColorPageTable;
+float _ColorTileAtlasSize;
+float _ColorTileSize;
+float _ColorTileBorder;
+float _ColorMaxTileLevel;
+
+// Virtual texture pyramid for the planet HEIGHTMAP (vertex-stage sample for GPU displacement).
+// Same layout convention as the colormap above; bound to its own atlas + page table so the two can have
+// different formats (e.g. BC4 heightmap vs BC1/RGBA color).
+sampler2D _HeightTileAtlas;
+sampler2D _HeightPageTable;
+float _HeightTileAtlasSize;
+float _HeightTileSize;
+float _HeightTileBorder;
+float _HeightMaxTileLevel;
 
 float _HeightScale;
 float _HeightOffset;
 float _NearFieldEnd;
 float _BlendWidth;
-// Width (in texels) of one face slice of _PlanetHeightmap. Auto-set by the C# loader; needed by the
-// Mitchell-Netravali sampler to walk the texel grid manually.
-float _HeightmapResolution;
 
 #if defined (AMBIENT_OCCLUSION)
     sampler2D _OcclusionMap;
@@ -99,3 +115,8 @@ float _LowMidBlendEnd;
 
 float _MidHighBlendStart;
 float _MidHighBlendEnd;
+
+// VT debug visualisation mode (set globally from C# debug UI):
+//   0 = resident level — the level the walk actually lands on (default)
+//   1 = desired level  — what the shader's screen-space-derivative formula asks for
+float _VTDebugMode;

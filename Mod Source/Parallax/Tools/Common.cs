@@ -190,13 +190,21 @@ namespace Parallax
     public class ParallaxTerrainBody
     {
         public string planetName;
-        public Dictionary<string, TextureHandle> loadedTextures = [];
+        public Dictionary<string, TextureHandle<Texture2D>> loadedTextures = [];
 
         // Terrain materials
         public ParallaxMaterials parallaxMaterials = new ParallaxMaterials();
 
         public ShaderProperties terrainShaderProperties;
         public bool emissive = false;
+
+        // Virtual texture cache config (optional). Populated by ConfigLoader if the body's ParallaxTerrain
+        // node contains a "VirtualTexture" subnode; null otherwise. When set, ParallaxTerrainBody.Load()
+        // preloads each configured pyramid into its own TileCache and binds it to the parallax materials
+        // under the appropriate uniform prefix (_Color / _Height).
+        public VirtualTextureConfig virtualTextureConfig = null;
+        public TileCache colorTileCache = null;
+        public TileCache heightTileCache = null;
 
         private bool loaded = false;
         public bool Loaded
@@ -325,7 +333,6 @@ namespace Parallax
             {
                 if (loadedTextures.ContainsKey(name))
                     continue;
-                // Empty path means the property was intentionally left unset (e.g. optional Texture2DArray).
                 if (string.IsNullOrEmpty(path))
                     continue;
 
@@ -334,9 +341,7 @@ namespace Parallax
                     Linear = TextureUtils.IsLinear(name),
                     Unreadable = true,
                 };
-                TextureHandle handle = TextureUtils.IsArray(name)
-                    ? TextureLoader.LoadTexture<Texture2DArray>(path, options)
-                    : TextureLoader.LoadTexture<Texture2D>(path, options);
+                var handle = TextureLoader.LoadTexture<Texture2D>(path, options);
                 handle.OnCompleted += ParallaxDebug.LogTextureLoaded;
 
                 loadedTextures.Add(name, handle);
@@ -359,43 +364,15 @@ namespace Parallax
                 Linear = TextureUtils.IsLinear(name),
                 Unreadable = true,
             };
-            TextureHandle handle = TextureUtils.IsArray(name)
-                ? TextureLoader.LoadTexture<Texture2DArray>(path, options)
-                : TextureLoader.LoadTexture<Texture2D>(path, options);
+            var handle = TextureLoader.LoadTexture<Texture2D>(path, options);
             handle.OnCompleted += ParallaxDebug.LogTextureLoaded;
 
             loadedTextures.Add(name, handle);
         }
 
-        // Applies per-name texture import overrides (wrap/filter mode, derived uniforms) and broadcasts
-        // the texture to every parallax material variant.
+        // Broadcasts a loaded texture to every parallax material variant.
         private void ApplyTextureToMaterials(string name, Texture tex)
         {
-            if (tex != null && TextureUtils.IsArray(name))
-            {
-                // Cube-face Texture2DArrays need clamp wrap so a sample at face-edge (u=1 etc.) doesn't
-                // wrap around to the opposite edge of the same face slice.
-                tex.wrapMode = TextureWrapMode.Clamp;
-
-                // _PlanetHeightmap is currently sampled bilinearly in the vertex shader; leave filterMode at
-                // the loader default. (If SampleHeightmapMitchellLOD0 is re-enabled in the shader, switch
-                // filterMode to FilterMode.Point here so the manual cubic filter sees raw texel values.)
-                // _HeightmapResolution stays pushed to the materials so the Mitchell helper remains usable.
-                if (name == "_PlanetHeightmap")
-                {
-                    if (tex is Texture2DArray array && array.width > 0)
-                    {
-                        float resolution = array.width;
-                        parallaxMaterials.parallaxLow.SetFloat("_HeightmapResolution", resolution);
-                        parallaxMaterials.parallaxMid.SetFloat("_HeightmapResolution", resolution);
-                        parallaxMaterials.parallaxHigh.SetFloat("_HeightmapResolution", resolution);
-                        parallaxMaterials.parallaxLowMid.SetFloat("_HeightmapResolution", resolution);
-                        parallaxMaterials.parallaxMidHigh.SetFloat("_HeightmapResolution", resolution);
-                        parallaxMaterials.parallaxFull.SetFloat("_HeightmapResolution", resolution);
-                    }
-                }
-            }
-
             parallaxMaterials.parallaxLow.SetTexture(name, tex);
             parallaxMaterials.parallaxMid.SetTexture(name, tex);
             parallaxMaterials.parallaxHigh.SetTexture(name, tex);
@@ -416,11 +393,11 @@ namespace Parallax
 
             foreach (var name in terrainShaderProperties.shaderTextures.Keys)
             {
-                // Property has no path set — skip (handled by shader-side default).
+                // Property has no path set — skip.
                 if (!loadedTextures.TryGetValue(name, out var request))
                     continue;
 
-                Texture tex;
+                Texture2D tex;
                 try
                 {
                     tex = request.GetTexture();
@@ -438,6 +415,8 @@ namespace Parallax
                 ApplyTextureToMaterials(name, tex);
             }
 
+            EnsureVirtualTextureCache();
+
             loaded = true;
         }
         public IEnumerator LoadAsync()
@@ -453,11 +432,11 @@ namespace Parallax
 
             foreach (var name in terrainShaderProperties.shaderTextures.Keys)
             {
-                // Property has no path set — skip (handled by shader-side default).
+                // Property has no path set — skip.
                 if (!loadedTextures.TryGetValue(name, out var request))
                     continue;
 
-                Texture tex;
+                Texture2D tex;
 
                 if (!request.IsComplete)
                     yield return request;
@@ -478,10 +457,52 @@ namespace Parallax
                 ApplyTextureToMaterials(name, tex);
             }
 
+            EnsureVirtualTextureCache();
+
             loaded = true;
             isLoading = false;
         }
-        public static Texture LoadTexIfUnloaded(ParallaxTerrainBody body, string path, string key)
+
+        // If this body opted into the virtual texture cache (via a "VirtualTexture" config block),
+        // build a TileCache per configured pyramid (colormap, heightmap), synchronously bootstrap the
+        // coarse levels so the shader always has a fallback, bind each cache to all material variants,
+        // then register with TileStreamingManager for fine-level on-demand streaming. Safe to call
+        // repeatedly — caches are only built once.
+        private void EnsureVirtualTextureCache()
+        {
+            if (virtualTextureConfig == null || !virtualTextureConfig.IsValid)
+                return;
+
+            var cfg = virtualTextureConfig;
+
+            if (cfg.HasColormap && colorTileCache == null)
+            {
+                colorTileCache = new TileCache(cfg.atlasSize, cfg.tileSize, cfg.borderPx, cfg.maxLevel);
+                colorTileCache.BootstrapCoarseLevels(cfg.colormapTilePath, TileStreamingManager.CoarseMaxLevel);
+                BindCacheToAllMaterials(colorTileCache, "_Color");
+            }
+
+            if (cfg.HasHeightmap && heightTileCache == null)
+            {
+                heightTileCache = new TileCache(cfg.atlasSize, cfg.tileSize, cfg.borderPx, cfg.maxLevel);
+                heightTileCache.BootstrapCoarseLevels(cfg.heightmapTilePath, TileStreamingManager.CoarseMaxLevel);
+                BindCacheToAllMaterials(heightTileCache, "_Height");
+            }
+
+            // Register for fine-level streaming (levels CoarseMaxLevel+1..maxLevel).
+            TileStreamingManager.RegisterBody(planetName, this);
+        }
+
+        private void BindCacheToAllMaterials(TileCache cache, string uniformPrefix)
+        {
+            cache.BindToMaterial(parallaxMaterials.parallaxLow,     uniformPrefix);
+            cache.BindToMaterial(parallaxMaterials.parallaxMid,     uniformPrefix);
+            cache.BindToMaterial(parallaxMaterials.parallaxHigh,    uniformPrefix);
+            cache.BindToMaterial(parallaxMaterials.parallaxLowMid,  uniformPrefix);
+            cache.BindToMaterial(parallaxMaterials.parallaxMidHigh, uniformPrefix);
+            cache.BindToMaterial(parallaxMaterials.parallaxFull,    uniformPrefix);
+        }
+        public static Texture2D LoadTexIfUnloaded(ParallaxTerrainBody body, string path, string key)
         {
             if (!body.loadedTextures.TryGetValue(key, out var handle))
             {
@@ -491,9 +512,7 @@ namespace Parallax
                     Unreadable = true,
                     Hint = TextureLoadHint.Synchronous,
                 };
-                handle = TextureUtils.IsArray(key)
-                    ? TextureLoader.LoadTexture<Texture2DArray>(path, options)
-                    : TextureLoader.LoadTexture<Texture2D>(path, options);
+                handle = TextureLoader.LoadTexture<Texture2D>(path, options);
                 handle.OnCompleted += ParallaxDebug.LogTextureLoaded;
 
                 body.loadedTextures.Add(key, handle);
@@ -521,10 +540,28 @@ namespace Parallax
         public void Unload()
         {
             isLoading = false;
+
+            // Stop streaming before releasing the caches.
+            TileStreamingManager.UnregisterBody(planetName);
+
             // Unload all textures
             foreach (var handle in loadedTextures.Values)
                 handle.Dispose();
             loadedTextures.Clear();
+
+            // Release the virtual texture caches (atlas + page table per cache) so Reload() can rebuild
+            // them cleanly.
+            if (colorTileCache != null)
+            {
+                colorTileCache.Dispose();
+                colorTileCache = null;
+            }
+            if (heightTileCache != null)
+            {
+                heightTileCache.Dispose();
+                heightTileCache = null;
+            }
+
             loaded = false;
         }
     }
@@ -755,11 +792,9 @@ namespace Parallax
                     // loading the texture if we need it.
                     terrainBody.StartLoadByName(name);
 
-                    // Terrain body's loadedTextures is non-generic (it may hold Texture2DArray for e.g. _PlanetColormap);
-                    // only borrow handles that are actually Texture2D for the scaled body.
-                    if (terrainBody.loadedTextures.TryGetValue(name, out var sharedHandle) && sharedHandle is TextureHandle<Texture2D> tex2DHandle)
+                    if (terrainBody.loadedTextures.TryGetValue(name, out handle))
                     {
-                        loadedTextures.Add(name, tex2DHandle.Acquire());
+                        loadedTextures.Add(name, handle.Acquire());
                         continue;
                     }
                 }

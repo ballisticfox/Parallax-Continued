@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dotnet build *)"
+      "Bash(dotnet build *)",
+      "Bash(find \"C:\\\\Users\\\\Flame\\\\OneDrive\\\\Desktop\\\\KSP-Source\\\\KSPSource\" -name \"PQ.cs\" 2>/dev/null)",
+      "Read(//c/Users/Flame/OneDrive/Desktop/KSP-Source/KSPSource/**)",
+      "Bash(xargs -I{} grep -l \"TextureHandle\")",
+      "Read(//c/Users/Flame/**)",
+      "Bash(grep \"\\\\.cs$\")",
+      "Bash(xargs grep -l \"TextureHandle\")",
+      "Bash(find \"C:\\\\Users\\\\Flame\\\\OneDrive\\\\Documents\\\\GitHub\\\\Projects\\\\Parallax-Continued\\\\Mod Source\" -name \"*.dll\" 2>/dev/null | head -20; find \"E:\\\\KSP Installs\" -name \"KSPTextureLoader.dll\" 2>/dev/null | head -5)",
+      "Read(//e/KSP Installs/**)",
+      "Bash(ilspycmd KSPTextureLoader.dll --type KSPTextureLoader.TextureHandle)",
+      "Bash(powershell -Command 'Add-Type -Path '\\\\''E:\\\\KSP Installs\\\\Sol-Test\\\\GameData\\\\KSPTextureLoader\\\\Plugins\\\\KSPTextureLoader.dll'\\\\''; [KSPTextureLoader.TextureHandle].GetMembers\\(\\) | ForEach-Object { $_.ToString\\(\\) }')"
     ]
   }
 }

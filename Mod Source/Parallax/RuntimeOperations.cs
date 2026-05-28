@@ -119,6 +119,8 @@ namespace Parallax
         }
         public void Update()
         {
+            TileStreamingManager.Update(Time.frameCount);
+
             // Determine a celestial body change
             if (EventHandler.currentParallaxBody != null && FlightGlobals.currentMainBody != null)
             {
