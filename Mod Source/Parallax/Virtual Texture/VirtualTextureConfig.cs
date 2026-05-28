@@ -32,6 +32,7 @@ namespace Parallax
         // Resolves the same way as any other Parallax shader texture path.
         public string colormapTilePath;
         public string heightmapTilePath;
+        public string normalmapTilePath;
 
         public int atlasSize = 8192;
         public int tileSize = 256;
@@ -40,6 +41,7 @@ namespace Parallax
 
         public bool HasColormap => !string.IsNullOrEmpty(colormapTilePath);
         public bool HasHeightmap => !string.IsNullOrEmpty(heightmapTilePath);
-        public bool IsValid => HasColormap || HasHeightmap;
+        public bool HasNormalmap => !string.IsNullOrEmpty(normalmapTilePath);
+        public bool IsValid => HasColormap || HasHeightmap || HasNormalmap;
     }
 }

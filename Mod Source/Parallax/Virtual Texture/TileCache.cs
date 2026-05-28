@@ -98,11 +98,11 @@ namespace Parallax
         /// are never evicted by the streaming system.  These tiles provide the coarse fallback that
         /// the shader walks up to when a fine tile is not yet resident.
         /// </summary>
-        public void BootstrapCoarseLevels(string rootPath, int coarseMaxLevel)
+        public void BootstrapCoarseLevels(string rootPath, int coarseMaxLevel, bool linear = false)
         {
             coarseMaxLevel = Mathf.Clamp(coarseMaxLevel, 0, maxLevel);
 
-            var options = new TextureLoadOptions { Linear = false, Unreadable = true };
+            var options = new TextureLoadOptions { Linear = linear, Unreadable = true };
 
             var requests = new List<TileRequest>();
             for (int face = 0; face < 6; face++)

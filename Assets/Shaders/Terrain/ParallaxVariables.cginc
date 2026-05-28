@@ -43,6 +43,18 @@ float _HeightOffset;
 float _NearFieldEnd;
 float _BlendWidth;
 
+// Virtual texture pyramid for the planet NORMAL MAP (fragment-stage sample, tangent-space encoding).
+// Same layout/format conventions as the colormap pyramid; loaded with Linear=true so the GPU doesn't
+// sRGB-decode the tangent data on upload. _HasNormalVT is set to 1 by C# when this body has a normal
+// cache bound; 0 otherwise so the shader can early-out and keep using i.worldNormal.
+sampler2D _NormalTileAtlas;
+sampler2D _NormalPageTable;
+float _NormalTileAtlasSize;
+float _NormalTileSize;
+float _NormalTileBorder;
+float _NormalMaxTileLevel;
+float _HasNormalVT;
+
 #if defined (AMBIENT_OCCLUSION)
     sampler2D _OcclusionMap;
 #endif

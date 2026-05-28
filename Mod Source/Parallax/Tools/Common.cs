@@ -205,6 +205,7 @@ namespace Parallax
         public VirtualTextureConfig virtualTextureConfig = null;
         public TileCache colorTileCache = null;
         public TileCache heightTileCache = null;
+        public TileCache normalTileCache = null;
 
         private bool loaded = false;
         public bool Loaded
@@ -489,6 +490,18 @@ namespace Parallax
                 BindCacheToAllMaterials(heightTileCache, "_Height");
             }
 
+            if (cfg.HasNormalmap && normalTileCache == null)
+            {
+                normalTileCache = new TileCache(cfg.atlasSize, cfg.tileSize, cfg.borderPx, cfg.maxLevel);
+                // Linear=true so the GPU doesn't sRGB-decode tangent-space normal data on upload.
+                normalTileCache.BootstrapCoarseLevels(cfg.normalmapTilePath, TileStreamingManager.CoarseMaxLevel, linear: true);
+                BindCacheToAllMaterials(normalTileCache, "_Normal");
+            }
+
+            // Flag the shader to actually consume the normal VT — bodies without one will skip the
+            // sample path and keep using i.worldNormal.
+            SetMaterialFloat("_HasNormalVT", normalTileCache != null ? 1f : 0f);
+
             // Register for fine-level streaming (levels CoarseMaxLevel+1..maxLevel).
             TileStreamingManager.RegisterBody(planetName, this);
         }
@@ -501,6 +514,16 @@ namespace Parallax
             cache.BindToMaterial(parallaxMaterials.parallaxLowMid,  uniformPrefix);
             cache.BindToMaterial(parallaxMaterials.parallaxMidHigh, uniformPrefix);
             cache.BindToMaterial(parallaxMaterials.parallaxFull,    uniformPrefix);
+        }
+
+        private void SetMaterialFloat(string name, float value)
+        {
+            parallaxMaterials.parallaxLow.SetFloat(name, value);
+            parallaxMaterials.parallaxMid.SetFloat(name, value);
+            parallaxMaterials.parallaxHigh.SetFloat(name, value);
+            parallaxMaterials.parallaxLowMid.SetFloat(name, value);
+            parallaxMaterials.parallaxMidHigh.SetFloat(name, value);
+            parallaxMaterials.parallaxFull.SetFloat(name, value);
         }
         public static Texture2D LoadTexIfUnloaded(ParallaxTerrainBody body, string path, string key)
         {
@@ -560,6 +583,14 @@ namespace Parallax
             {
                 heightTileCache.Dispose();
                 heightTileCache = null;
+            }
+            if (normalTileCache != null)
+            {
+                normalTileCache.Dispose();
+                normalTileCache = null;
+                // Reset the keyword-equivalent flag so a subsequent load without a normal VT doesn't keep
+                // shading against a stale page table.
+                SetMaterialFloat("_HasNormalVT", 0f);
             }
 
             loaded = false;

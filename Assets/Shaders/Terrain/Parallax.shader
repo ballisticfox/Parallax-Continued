@@ -57,6 +57,14 @@ Shader "Custom/Parallax"
         [HideInInspector] _HeightTileBorder("Height Tile Border", Float) = 4
         [HideInInspector] _HeightMaxTileLevel("Height Max Tile Level", Float) = 3
 
+        [HideInInspector] _NormalTileAtlas("Normal Tile Atlas", 2D) = "bump" {}
+        [HideInInspector] _NormalPageTable("Normal Page Table", 2D) = "black" {}
+        [HideInInspector] _NormalTileAtlasSize("Normal Tile Atlas Size", Float) = 8192
+        [HideInInspector] _NormalTileSize("Normal Tile Size", Float) = 256
+        [HideInInspector] _NormalTileBorder("Normal Tile Border", Float) = 4
+        [HideInInspector] _NormalMaxTileLevel("Normal Max Tile Level", Float) = 3
+        [HideInInspector] _HasNormalVT("Has Normal VT", Float) = 0
+
         [Space(10)]
         [Header(GPU Heightmap Displacement)]
         [Space(10)]
@@ -270,7 +278,13 @@ Shader "Custom/Parallax"
 
                 float3 vertexColor = SampleColormapVT(faceUV, faceIndex);
 
-                i.worldNormal = normalize(i.worldNormal);
+                // Sample the VT normal once; reuse for both the early biplanar-input blend and the late
+                // finalNormal blend below. blendFactor matches ApplyGPUHeightmapDisplacement so the
+                // near/far hand-off stays in lockstep with the GPU displacement.
+                float3 vtWorldNormal;
+                bool   hasVTWorldNormal = TrySampleVTWorldNormal(faceUV, faceIndex, i.worldPos, vtWorldNormal);
+                float  vtNormalBlend    = saturate((terrainDistance - _NearFieldEnd) / _BlendWidth);
+                i.worldNormal = BlendNormalWithVT(normalize(i.worldNormal), vtWorldNormal, hasVTWorldNormal, vtNormalBlend);
                 float3 viewDir = normalize(i.viewDir);
                 
                 // Red low-mid blend, green mid-high blend, blue steep, alpha midpoint which distinguishes low from high
@@ -331,7 +345,13 @@ Shader "Custom/Parallax"
                 NORMAL_FLOAT altitudeNormal = BLEND_TEXTURES(landMask, lowNormal, midNormal, highNormal);
 
                 fixed4 finalDiffuse = lerp(altitudeDiffuse, steepDiffuse, landMask.b);
-                NORMAL_FLOAT finalNormal = lerp(altitudeNormal, steepNormal, landMask.b); 
+                NORMAL_FLOAT finalNormal = lerp(altitudeNormal, steepNormal, landMask.b);
+
+                // VT normal also drives the final lighting normal in the far field — biplanar reconstructs
+                // tiling normals against world axes, so without this the VT-blended i.worldNormal only
+                // reweights axes rather than rotating the actual shading direction. Reuses the cached
+                // vtWorldNormal from the early blend above (one sample per fragment, two blend sites).
+                finalNormal.xyz = BlendNormalWithVT(finalNormal.xyz, vtWorldNormal, hasVTWorldNormal, vtNormalBlend);
 
                 float3 result = CalculateLighting(finalDiffuse, finalNormal.xyz, viewDir, GET_SHADOW, _WorldSpaceLightPos0);
                 UNITY_APPLY_FOG(i.fogCoord, result);
@@ -622,7 +642,13 @@ Shader "Custom/Parallax"
 
                 float3 vertexColor = SampleColormapVT(faceUV, faceIndex);
 
-                i.worldNormal = normalize(i.worldNormal);
+                // Sample the VT normal once; reuse for both the early biplanar-input blend and the late
+                // finalNormal blend below. blendFactor matches ApplyGPUHeightmapDisplacement so the
+                // near/far hand-off stays in lockstep with the GPU displacement.
+                float3 vtWorldNormal;
+                bool   hasVTWorldNormal = TrySampleVTWorldNormal(faceUV, faceIndex, i.worldPos, vtWorldNormal);
+                float  vtNormalBlend    = saturate((terrainDistance - _NearFieldEnd) / _BlendWidth);
+                i.worldNormal = BlendNormalWithVT(normalize(i.worldNormal), vtWorldNormal, hasVTWorldNormal, vtNormalBlend);
                 float3 viewDir = normalize(i.viewDir);
                 float3 lightDir = normalize(i.lightDir);
 
@@ -684,7 +710,12 @@ Shader "Custom/Parallax"
                 float3 altitudeNormal = BLEND_TEXTURES(landMask, lowNormal, midNormal, highNormal);
 
                 fixed4 finalDiffuse = lerp(altitudeDiffuse, steepDiffuse, landMask.b);
-                float3 finalNormal = lerp(altitudeNormal, steepNormal, landMask.b); 
+                float3 finalNormal = lerp(altitudeNormal, steepNormal, landMask.b);
+
+                // VT normal also drives the final lighting normal in the far field — biplanar reconstructs
+                // tiling normals against world axes, so without this the VT-blended i.worldNormal only
+                // reweights axes rather than rotating the actual shading direction.
+                finalNormal = BlendNormalWithVT(finalNormal, vtWorldNormal, hasVTWorldNormal, vtNormalBlend);
 
                 float atten = LIGHT_ATTENUATION(i);
                 float3 result = CalculateLighting(finalDiffuse, finalNormal, viewDir, GET_SHADOW, lightDir);
@@ -878,7 +909,13 @@ Shader "Custom/Parallax"
 
                 float3 vertexColor = SampleColormapVT(faceUV, faceIndex);
 
-                i.worldNormal = normalize(i.worldNormal);
+                // Sample the VT normal once; reuse for both the early biplanar-input blend and the late
+                // finalNormal blend below. blendFactor matches ApplyGPUHeightmapDisplacement so the
+                // near/far hand-off stays in lockstep with the GPU displacement.
+                float3 vtWorldNormal;
+                bool   hasVTWorldNormal = TrySampleVTWorldNormal(faceUV, faceIndex, i.worldPos, vtWorldNormal);
+                float  vtNormalBlend    = saturate((terrainDistance - _NearFieldEnd) / _BlendWidth);
+                i.worldNormal = BlendNormalWithVT(normalize(i.worldNormal), vtWorldNormal, hasVTWorldNormal, vtNormalBlend);
                 float3 viewDir = normalize(i.viewDir);
                 
                 // Red low-mid blend, green mid-high blend, blue steep, alpha midpoint which distinguishes low from high
@@ -921,6 +958,12 @@ Shader "Custom/Parallax"
 
                 fixed4 finalDiffuse = lerp(altitudeDiffuse, steepDiffuse, landMask.b);
                 NORMAL_FLOAT finalNormal = lerp(altitudeNormal, steepNormal, landMask.b);
+
+                // VT normal also drives the final lighting normal in the far field — biplanar reconstructs
+                // tiling normals against world axes, so without this the VT-blended i.worldNormal only
+                // reweights axes rather than rotating the actual shading direction. Reuses the cached
+                // vtWorldNormal from the early blend above (one sample per fragment, two blend sites).
+                finalNormal.xyz = BlendNormalWithVT(finalNormal.xyz, vtWorldNormal, hasVTWorldNormal, vtNormalBlend);
 
                 BLEND_OCCLUSION(landMask, occlusion)
 

@@ -447,17 +447,18 @@ namespace Parallax
             }
         }
         // Parses a "VirtualTexture" subnode of ParallaxTerrain.Body into a VirtualTextureConfig.
-        // At least one of colormapTilePath / heightmapTilePath must be set; the rest defaults to
-        // slice_tiles.py's defaults.
+        // At least one of colormapTilePath / heightmapTilePath / normalmapTilePath must be set;
+        // the rest defaults to slice_tiles.py's defaults.
         private static VirtualTextureConfig ParseVirtualTextureConfig(ConfigNode node, string planetName)
         {
             var cfg = new VirtualTextureConfig();
 
             cfg.colormapTilePath  = node.GetValue("colormapTilePath");
             cfg.heightmapTilePath = node.GetValue("heightmapTilePath");
+            cfg.normalmapTilePath = node.GetValue("normalmapTilePath");
             if (!cfg.IsValid)
             {
-                ParallaxDebug.LogCritical($"VirtualTexture block on {planetName} has neither 'colormapTilePath' nor 'heightmapTilePath' set — ignoring.");
+                ParallaxDebug.LogCritical($"VirtualTexture block on {planetName} has no 'colormapTilePath' / 'heightmapTilePath' / 'normalmapTilePath' set — ignoring.");
                 return null;
             }
 

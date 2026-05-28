@@ -200,6 +200,11 @@ namespace Parallax.Debugging
                                  info.colorQueue,  info.colorFlight,  info.colorLevelCounts);
                 AppendCacheLine(sb, "Height", info.heightSlots, info.heightTotal,
                                  info.heightQueue, info.heightFlight, info.heightLevelCounts);
+                if (info.normalTotal > 0)
+                {
+                    AppendCacheLine(sb, "Normal", info.normalSlots, info.normalTotal,
+                                     info.normalQueue, info.normalFlight, info.normalLevelCounts);
+                }
 
                 sb.Append("  req:").Append(info.tilesRequested)
                   .Append("  loaded:").Append(info.tilesLoaded).Append('\n');

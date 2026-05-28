@@ -43,6 +43,13 @@ namespace Parallax
             Unreadable = true,
         };
 
+        // Normal-map tangent data must not go through sRGB decode on upload.
+        private static readonly TextureLoadOptions NormalStreamingOptions = new TextureLoadOptions
+        {
+            Linear     = true,
+            Unreadable = true,
+        };
+
         // ──────────────────────────────────────────────────────────────────────────────────
         // Per-body state
         // ──────────────────────────────────────────────────────────────────────────────────
@@ -56,18 +63,22 @@ namespace Parallax
             // Tiles currently being loaded (to avoid duplicate requests)
             public HashSet<long> colorLoading  = new HashSet<long>();
             public HashSet<long> heightLoading = new HashSet<long>();
+            public HashSet<long> normalLoading = new HashSet<long>();
 
             // Async loads in flight
             public List<InFlightTile> colorInFlight  = new List<InFlightTile>();
             public List<InFlightTile> heightInFlight = new List<InFlightTile>();
+            public List<InFlightTile> normalInFlight = new List<InFlightTile>();
 
             // Pending load queue (rebuilt each frame, sorted by priority before processing)
             public List<PendingTile> colorQueue  = new List<PendingTile>();
             public List<PendingTile> heightQueue = new List<PendingTile>();
+            public List<PendingTile> normalQueue = new List<PendingTile>();
 
             // Completed tiles waiting for upload
             public Queue<CompletedTile> colorCompleted  = new Queue<CompletedTile>();
             public Queue<CompletedTile> heightCompleted = new Queue<CompletedTile>();
+            public Queue<CompletedTile> normalCompleted = new Queue<CompletedTile>();
 
             // Metrics
             public int tilesRequestedLastFrame;
@@ -132,10 +143,13 @@ namespace Parallax
             public string sphereName;
             public int    colorSlots, colorTotal;
             public int    heightSlots, heightTotal;
+            public int    normalSlots, normalTotal;
             public int[]  colorLevelCounts;   // length = maxLevel+1, or null
             public int[]  heightLevelCounts;
+            public int[]  normalLevelCounts;
             public int    colorQueue,  colorFlight;
             public int    heightQueue, heightFlight;
+            public int    normalQueue, normalFlight;
             public int    tilesRequested, tilesLoaded;
         }
 
@@ -147,6 +161,7 @@ namespace Parallax
                 var state  = kvp.Value;
                 var color  = state.body.colorTileCache;
                 var height = state.body.heightTileCache;
+                var normal = state.body.normalTileCache;
                 result.Add(new BodyDebugInfo
                 {
                     sphereName        = state.sphereName,
@@ -154,12 +169,17 @@ namespace Parallax
                     colorTotal        = color  != null ? color.TotalSlots        : 0,
                     heightSlots       = height != null ? height.OccupiedSlots   : 0,
                     heightTotal       = height != null ? height.TotalSlots       : 0,
+                    normalSlots       = normal != null ? normal.OccupiedSlots   : 0,
+                    normalTotal       = normal != null ? normal.TotalSlots       : 0,
                     colorLevelCounts  = color  != null ? color.GetLevelCounts()  : null,
                     heightLevelCounts = height != null ? height.GetLevelCounts() : null,
+                    normalLevelCounts = normal != null ? normal.GetLevelCounts() : null,
                     colorQueue        = state.colorQueue.Count,
                     colorFlight       = state.colorInFlight.Count,
                     heightQueue       = state.heightQueue.Count,
                     heightFlight      = state.heightInFlight.Count,
+                    normalQueue       = state.normalQueue.Count,
+                    normalFlight      = state.normalInFlight.Count,
                     tilesRequested    = state.tilesRequestedLastFrame,
                     tilesLoaded       = state.tilesLoadedLastFrame,
                 });
@@ -175,8 +195,10 @@ namespace Parallax
             // Release any in-flight handles to avoid texture leaks.
             foreach (var t in state.colorInFlight)  t.handle.Dispose();
             foreach (var t in state.heightInFlight) t.handle.Dispose();
+            foreach (var t in state.normalInFlight) t.handle.Dispose();
             while (state.colorCompleted.Count  > 0) state.colorCompleted.Dequeue().handle.Dispose();
             while (state.heightCompleted.Count > 0) state.heightCompleted.Dequeue().handle.Dispose();
+            while (state.normalCompleted.Count > 0) state.normalCompleted.Dequeue().handle.Dispose();
 
             s_Bodies.Remove(sphereName);
             ParallaxDebug.Log($"TileStreamingManager: unregistered '{sphereName}'");
@@ -196,6 +218,7 @@ namespace Parallax
         {
             TileCache colorCache  = state.body.colorTileCache;
             TileCache heightCache = state.body.heightTileCache;
+            TileCache normalCache = state.body.normalTileCache;
             VirtualTextureConfig cfg = state.cfg;
 
             // ── Phase 1: determine required tiles from visible quads ──────────────────────
@@ -210,12 +233,14 @@ namespace Parallax
             {
                 colorCache?.MarkTileUsed(key, frame);
                 heightCache?.MarkTileUsed(key, frame);
+                normalCache?.MarkTileUsed(key, frame);
             }
 
             // ── Phase 3: build per-cache pending queues ───────────────────────────────────
 
             state.colorQueue.Clear();
             state.heightQueue.Clear();
+            state.normalQueue.Clear();
 
             foreach (long key in s_RequiredScratch)
             {
@@ -239,16 +264,28 @@ namespace Parallax
                         rootPath = cfg.heightmapTilePath,
                     });
                 }
+                if (normalCache != null && !normalCache.IsTileResident(key) && !state.normalLoading.Contains(key))
+                {
+                    TileCache.UnpackKey(key, out int face, out int level, out int tx, out int ty);
+                    state.normalQueue.Add(new PendingTile
+                    {
+                        key = key, face = face, level = level, tx = tx, ty = ty,
+                        priority = level,
+                        rootPath = cfg.normalmapTilePath,
+                    });
+                }
             }
 
             // Sort: coarser first (smaller level = lower priority value = higher importance).
             state.colorQueue.Sort( (a, b) => a.priority.CompareTo(b.priority));
             state.heightQueue.Sort((a, b) => a.priority.CompareTo(b.priority));
+            state.normalQueue.Sort((a, b) => a.priority.CompareTo(b.priority));
 
             // ── Phase 4: start new async loads ────────────────────────────────────────────
 
-            StartLoads(state.colorQueue,  state.colorInFlight,  state.colorLoading,  state.colorCompleted);
-            StartLoads(state.heightQueue, state.heightInFlight, state.heightLoading, state.heightCompleted);
+            StartLoads(state.colorQueue,  state.colorInFlight,  state.colorLoading,  state.colorCompleted,  StreamingOptions);
+            StartLoads(state.heightQueue, state.heightInFlight, state.heightLoading, state.heightCompleted, StreamingOptions);
+            StartLoads(state.normalQueue, state.normalInFlight, state.normalLoading, state.normalCompleted, NormalStreamingOptions);
 
             // ── Phase 5: tick in-flight handles and upload completed tiles ────────────────
 
@@ -257,11 +294,14 @@ namespace Parallax
                           colorCache,  frame, ref uploaded);
             DrainInFlight(state.heightInFlight, state.heightLoading, state.heightCompleted,
                           heightCache, frame, ref uploaded);
+            DrainInFlight(state.normalInFlight, state.normalLoading, state.normalCompleted,
+                          normalCache, frame, ref uploaded);
 
             // ── Phase 6: flush page tables ────────────────────────────────────────────────
 
             colorCache?.ApplyPageTable();
             heightCache?.ApplyPageTable();
+            normalCache?.ApplyPageTable();
 
             state.tilesLoadedLastFrame = uploaded;
 
@@ -275,12 +315,14 @@ namespace Parallax
                 int colorTotal      = colorCache  != null ? colorCache.TotalSlots      : 0;
                 int heightOccupancy = heightCache != null ? heightCache.OccupiedSlots  : 0;
                 int heightTotal     = heightCache != null ? heightCache.TotalSlots     : 0;
+                int normalOccupancy = normalCache != null ? normalCache.OccupiedSlots  : 0;
+                int normalTotal     = normalCache != null ? normalCache.TotalSlots     : 0;
                 ParallaxDebug.Log(
                     $"[VT Stream] {state.sphereName}  " +
                     $"req={state.tilesRequestedLastFrame}  loaded={state.tilesLoadedLastFrame}  " +
-                    $"colorSlots={colorOccupancy}/{colorTotal}  heightSlots={heightOccupancy}/{heightTotal}  " +
-                    $"colorQueue={state.colorQueue.Count}  heightQueue={state.heightQueue.Count}  " +
-                    $"colorFlight={state.colorInFlight.Count}  heightFlight={state.heightInFlight.Count}");
+                    $"colorSlots={colorOccupancy}/{colorTotal}  heightSlots={heightOccupancy}/{heightTotal}  normalSlots={normalOccupancy}/{normalTotal}  " +
+                    $"colorQueue={state.colorQueue.Count}  heightQueue={state.heightQueue.Count}  normalQueue={state.normalQueue.Count}  " +
+                    $"colorFlight={state.colorInFlight.Count}  heightFlight={state.heightInFlight.Count}  normalFlight={state.normalInFlight.Count}");
             }
         }
 
@@ -322,7 +364,8 @@ namespace Parallax
             List<PendingTile>          queue,
             List<InFlightTile>         inFlight,
             HashSet<long>              loading,
-            Queue<CompletedTile>       completed)
+            Queue<CompletedTile>       completed,
+            TextureLoadOptions         options)
         {
             int slots = MaxConcurrentLoads - inFlight.Count;
             for (int i = 0; i < queue.Count && slots > 0; i++)
@@ -338,7 +381,7 @@ namespace Parallax
                     continue;
                 }
 
-                var handle = TextureLoader.LoadTexture<Texture2D>(path, StreamingOptions);
+                var handle = TextureLoader.LoadTexture<Texture2D>(path, options);
                 loading.Add(p.key);
 
                 // Capture values for the completion lambda.

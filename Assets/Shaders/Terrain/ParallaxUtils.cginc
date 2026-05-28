@@ -156,6 +156,56 @@ float3 SampleColormapVT(float2 faceUV, float faceIndex)
         faceUV, faceIndex, desiredLevel).rgb;
 }
 
+// Fragment-stage tangent-space normal sample, transformed to world space via a sphere-aligned TBN.
+//
+// TBN convention: N = radial planet direction (worldPos - _PlanetOrigin); T = east (perpendicular to the
+// world up axis, tangent to the sphere); B = N x T (locally north). Normal maps must be baked in this
+// same convention — R perturbs eastward, G perturbs northward. The 0.999 pole threshold swaps T to a
+// safe orthogonal when worldUp is nearly parallel to N.
+//
+// Returns true and writes the VT-derived world-space normal to `vtWorldNormal` when a tile is resident.
+// Returns false on either "normal VT not bound for this body" or "no tile loaded for this pixel at any
+// pyramid level" — caller should skip the VT blend in that case.
+//
+// Designed to be called ONCE per fragment; the result feeds both the early biplanar-input blend and the
+// late finalNormal blend so we don't pay for the page-table walk + atlas sample twice.
+bool TrySampleVTWorldNormal(float2 faceUV, float faceIndex, float3 worldPos, out float3 vtWorldNormal)
+{
+    vtWorldNormal = float3(0.0, 1.0, 0.0); // unused on miss
+
+    if (_HasNormalVT < 0.5) return false;
+
+    float screenPixelUV = max(length(ddx(faceUV)), length(ddy(faceUV)));
+    int desiredLevel = (int)floor(-log2(max(screenPixelUV * _NormalTileSize, 1e-12)));
+    float4 packed = SampleVTPyramid(
+        _NormalTileAtlas, _NormalPageTable,
+        _NormalTileAtlasSize, _NormalTileSize, _NormalTileBorder, _NormalMaxTileLevel,
+        faceUV, faceIndex, desiredLevel);
+
+    // SampleVTPyramid returns alpha=0 (debug magenta) when no tile is loaded at any level — fall back.
+    if (packed.a < 0.5) return false;
+
+    float3 tangentN = UnpackNormal(packed);
+
+    float3 N = normalize(worldPos - _PlanetOrigin);
+    float3 worldUp = float3(0.0, 1.0, 0.0);
+    float3 T = (abs(dot(worldUp, N)) > 0.999) ? float3(1.0, 0.0, 0.0) : normalize(cross(worldUp, N));
+    float3 B = cross(N, T);
+
+    vtWorldNormal = normalize(tangentN.x * T + tangentN.y * B + tangentN.z * N);
+    return true;
+}
+
+// Conditional VT-normal blend. Lerps baseNormal toward vtWorldNormal by blendFactor, but only when
+// hasVTNormal is true and blendFactor > 0. Returns baseNormal unchanged otherwise — preserves the
+// original (no-VT) shading path exactly. Same blend factor as ApplyGPUHeightmapDisplacement so the
+// near/far hand-off stays in lockstep with the GPU displacement.
+float3 BlendNormalWithVT(float3 baseNormal, float3 vtWorldNormal, bool hasVTNormal, float blendFactor)
+{
+    if (!hasVTNormal || blendFactor <= 0.0) return baseNormal;
+    return normalize(lerp(baseNormal, vtWorldNormal, blendFactor));
+}
+
 // Walks the color page table and returns the highest level that is actually resident,
 // starting from startLevel and falling back toward 0. Returns -1 if nothing is loaded.
 // Used by PARALLAX_VT_DEBUG to colour terrain by streaming quality without reading the atlas.
